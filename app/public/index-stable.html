@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TODO App - Stable</title>
+  <link rel="stylesheet" href="/styles/base.css">
+  <link rel="stylesheet" href="/styles/stable.css">
+</head>
+<body>
+  <div class="container">
+    <h1>TODO List <span class="env-badge">Stable</span></h1>
+
+    <!-- STABLE: form uses id-based selectors, classic button -->
+    <form class="todo-form" id="add-todo-form">
+      <input type="text" id="todo-input" placeholder="What needs to be done?" autocomplete="off">
+      <button type="submit" id="add-todo">Add</button>
+    </form>
+
+    <ul id="todo-list"></ul>
+    <p class="empty-state" id="empty-msg">No todos yet. Add one above!</p>
+  </div>
+
+  <script>
+    const API = '/api/todos';
+    const list = document.getElementById('todo-list');
+    const form = document.getElementById('add-todo-form');
+    const input = document.getElementById('todo-input');
+    const emptyMsg = document.getElementById('empty-msg');
+
+    // Auth: include token in all requests
+    const authToken = localStorage.getItem('auth-token');
+    if (!authToken) { window.location.href = '/login'; }
+    const authHeaders = { 'Authorization': `Bearer ${authToken}` };
+
+    async function authFetch(url, opts = {}) {
+      opts.headers = { ...opts.headers, ...authHeaders };
+      const res = await fetch(url, opts);
+      if (res.status === 401) { localStorage.removeItem('auth-token'); window.location.href = '/login'; }
+      return res;
+    }
+
+    async function loadTodos() {
+      const res = await authFetch(API);
+      const todos = await res.json();
+      renderTodos(todos);
+    }
+
+    function renderTodos(todos) {
+      list.innerHTML = '';
+      emptyMsg.style.display = todos.length === 0 ? 'block' : 'none';
+      todos.forEach(todo => {
+        const li = document.createElement('li');
+        li.dataset.id = todo.id;
+        if (todo.completed) li.classList.add('completed');
+        li.innerHTML = `
+          <input type="checkbox" class="toggle-checkbox" ${todo.completed ? 'checked' : ''}>
+          <span class="todo-text">${escapeHtml(todo.title)}</span>
+          <button class="edit-btn">Edit</button>
+          <button class="delete-btn">Delete</button>
+        `;
+        list.appendChild(li);
+      });
+    }
+
+    // CREATE
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = input.value.trim();
+      if (!title) return;
+      await authFetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title })
+      });
+      input.value = '';
+      loadTodos();
+    });
+
+    // TOGGLE / EDIT / DELETE via event delegation
+    list.addEventListener('click', async (e) => {
+      const li = e.target.closest('li');
+      if (!li) return;
+      const id = li.dataset.id;
+
+      // Toggle complete
+      if (e.target.classList.contains('toggle-checkbox')) {
+        await authFetch(`${API}/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ completed: e.target.checked })
+        });
+        loadTodos();
+      }
+
+      // Delete
+      else if (e.target.classList.contains('delete-btn')) {
+        await authFetch(`${API}/${id}`, { method: 'DELETE' });
+        loadTodos();
+      }
+
+      // INLINE EDIT (stable-specific pattern)
+      else if (e.target.classList.contains('edit-btn')) {
+        const textSpan = li.querySelector('.todo-text');
+        const currentText = textSpan.textContent;
+        const editInput = document.createElement('input');
+        editInput.type = 'text';
+        editInput.className = 'inline-edit';
+        editInput.value = currentText;
+        textSpan.style.display = 'none';
+        textSpan.parentNode.insertBefore(editInput, textSpan.nextSibling);
+        editInput.focus();
+        e.target.textContent = 'Save';
+        e.target.classList.replace('edit-btn', 'save-btn');
+
+        const save = async () => {
+          const newTitle = editInput.value.trim();
+          if (newTitle && newTitle !== currentText) {
+            await authFetch(`${API}/${id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title: newTitle })
+            });
+          }
+          loadTodos();
+        };
+
+        editInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); });
+        editInput.addEventListener('blur', save);
+      }
+
+      else if (e.target.classList.contains('save-btn')) {
+        const editInput = li.querySelector('.inline-edit');
+        if (editInput) editInput.dispatchEvent(new Event('blur'));
+      }
+    });
+
+    function escapeHtml(text) {
+      const d = document.createElement('div');
+      d.textContent = text;
+      return d.innerHTML;
+    }
+
+    loadTodos();
+  </script>
+</body>
+</html>

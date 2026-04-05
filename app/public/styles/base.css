@@ -1,0 +1,11 @@
+/* ===== BASE STYLES (shared across all envs) ===== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; min-height: 100vh; }
+.container { max-width: 650px; margin: 0 auto; padding: 2rem 1rem; }
+h1 { text-align: center; margin-bottom: 1.5rem; }
+.env-badge {
+  display: inline-block; padding: 2px 10px; border-radius: 12px;
+  font-size: 0.7rem; font-weight: bold; text-transform: uppercase;
+  vertical-align: middle; margin-left: 8px;
+}
+.empty-state { text-align: center; padding: 2rem; color: #888; }

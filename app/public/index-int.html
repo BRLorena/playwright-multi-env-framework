@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TODO App - INT</title>
+  <link rel="stylesheet" href="/styles/base.css">
+  <link rel="stylesheet" href="/styles/int.css">
+</head>
+<body>
+  <div class="container">
+    <h1>TODO List <span class="env-badge">INT</span></h1>
+
+    <!-- INT: uses data-testid attributes, dark theme, modal edit, filter toolbar -->
+    <form class="todo-form" data-testid="add-todo-form">
+      <input type="text" data-testid="todo-input" placeholder="Type something to do..." autocomplete="off">
+      <button type="submit" data-testid="add-todo">+ Add</button>
+    </form>
+
+    <!-- INT-only: filter toolbar -->
+    <div class="toolbar" data-testid="toolbar">
+      <span class="counter" data-testid="todo-counter">0 items</span>
+      <div class="filter-group">
+        <button class="filter-btn active" data-filter="all" data-testid="filter-all">All</button>
+        <button class="filter-btn" data-filter="active" data-testid="filter-active">Active</button>
+        <button class="filter-btn" data-filter="completed" data-testid="filter-completed">Completed</button>
+      </div>
+    </div>
+
+    <div class="todo-items" data-testid="todo-list"></div>
+    <p class="empty-state" data-testid="empty-state">Nothing here yet — start adding tasks!</p>
+
+    <!-- Modal for editing (INT version) -->
+    <div class="modal-overlay" data-testid="edit-modal">
+      <div class="modal">
+        <h2>Edit Task</h2>
+        <input type="text" data-testid="modal-edit-input" placeholder="Task title">
+        <div class="modal-actions">
+          <button class="cancel-btn" data-testid="modal-cancel">Cancel</button>
+          <button class="save-btn" data-testid="modal-save">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '/api/todos';
+    const listContainer = document.querySelector('[data-testid="todo-list"]');
+    const form = document.querySelector('[data-testid="add-todo-form"]');
+    const input = document.querySelector('[data-testid="todo-input"]');
+    const emptyState = document.querySelector('[data-testid="empty-state"]');
+    const counter = document.querySelector('[data-testid="todo-counter"]');
+    const modal = document.querySelector('[data-testid="edit-modal"]');
+    const modalInput = document.querySelector('[data-testid="modal-edit-input"]');
+    const modalSave = document.querySelector('[data-testid="modal-save"]');
+    const modalCancel = document.querySelector('[data-testid="modal-cancel"]');
+    let editingId = null;
+    let allTodos = [];
+    let currentFilter = 'all';
+
+    // Auth: include token in all requests
+    const authToken = localStorage.getItem('auth-token');
+    if (!authToken) { window.location.href = '/login'; }
+    const authHeaders = { 'Authorization': `Bearer ${authToken}` };
+
+    async function authFetch(url, opts = {}) {
+      opts.headers = { ...opts.headers, ...authHeaders };
+      const res = await fetch(url, opts);
+      if (res.status === 401) { localStorage.removeItem('auth-token'); window.location.href = '/login'; }
+      return res;
+    }
+
+    async function loadTodos() {
+      const res = await authFetch(API);
+      allTodos = await res.json();
+      applyFilter();
+    }
+
+    function applyFilter() {
+      let filtered = allTodos;
+      if (currentFilter === 'active') filtered = allTodos.filter(t => !t.completed);
+      if (currentFilter === 'completed') filtered = allTodos.filter(t => t.completed);
+      renderTodos(filtered);
+      updateCounter();
+    }
+
+    function updateCounter() {
+      const active = allTodos.filter(t => !t.completed).length;
+      counter.textContent = `${active} item${active !== 1 ? 's' : ''} left`;
+    }
+
+    function renderTodos(todos) {
+      listContainer.innerHTML = '';
+      emptyState.style.display = todos.length === 0 ? 'block' : 'none';
+      todos.forEach(todo => {
+        const item = document.createElement('div');
+        item.className = `todo-item${todo.completed ? ' completed' : ''}`;
+        item.dataset.testid = `todo-${todo.id}`;
+        item.dataset.id = todo.id;
+        item.innerHTML = `
+          <input type="checkbox" data-testid="toggle-${todo.id}" ${todo.completed ? 'checked' : ''}>
+          <span class="item-text" data-testid="text-${todo.id}">${escapeHtml(todo.title)}</span>
+          <div class="item-actions">
+            <button class="action-edit" data-testid="edit-${todo.id}">Edit</button>
+            <button class="action-delete" data-testid="delete-${todo.id}">Delete</button>
+          </div>
+        `;
+        listContainer.appendChild(item);
+      });
+    }
+
+    // CREATE
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = input.value.trim();
+      if (!title) return;
+      await authFetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title })
+      });
+      input.value = '';
+      loadTodos();
+    });
+
+    // TOGGLE / EDIT / DELETE
+    listContainer.addEventListener('click', async (e) => {
+      const item = e.target.closest('.todo-item');
+      if (!item) return;
+      const id = item.dataset.id;
+
+      // Toggle
+      if (e.target.type === 'checkbox') {
+        await authFetch(`${API}/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ completed: e.target.checked })
+        });
+        loadTodos();
+      }
+
+      // Delete
+      if (e.target.classList.contains('action-delete')) {
+        await authFetch(`${API}/${id}`, { method: 'DELETE' });
+        loadTodos();
+      }
+
+      // MODAL EDIT
+      if (e.target.classList.contains('action-edit')) {
+        editingId = id;
+        const textEl = item.querySelector('.item-text');
+        modalInput.value = textEl.textContent;
+        modal.classList.add('active');
+        modalInput.focus();
+      }
+    });
+
+    // Filter buttons
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentFilter = btn.dataset.filter;
+        applyFilter();
+      });
+    });
+
+    // Modal save
+    modalSave.addEventListener('click', async () => {
+      if (!editingId) return;
+      const newTitle = modalInput.value.trim();
+      if (newTitle) {
+        await authFetch(`${API}/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: newTitle })
+        });
+      }
+      closeModal();
+      loadTodos();
+    });
+
+    modalCancel.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+    modalInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') modalSave.click(); });
+
+    function closeModal() {
+      modal.classList.remove('active');
+      editingId = null;
+    }
+
+    function escapeHtml(text) {
+      const d = document.createElement('div');
+      d.textContent = text;
+      return d.innerHTML;
+    }
+
+    loadTodos();
+  </script>
+</body>
+</html>

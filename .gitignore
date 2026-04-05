@@ -1,0 +1,10 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+blob-report/
+allure-results/
+allure-report/
+.env
+*.db
+tests/.auth/

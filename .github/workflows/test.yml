@@ -1,0 +1,299 @@
+name: Playwright Multi-Environment Tests
+
+# Branch → Environment mapping:
+#   main    → stable (port 3001)
+#   release → release (port 3002)
+#   int     → int (port 3003)
+
+on:
+  push:
+    branches: [main, release, int]
+  pull_request:
+    branches: [main, release, int]
+  schedule:
+    # INT tests run nightly at 2am UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to test (stable, release, int, or all)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - stable
+          - release
+          - int
+
+jobs:
+  # Resolve which environment(s) to test based on the trigger
+  resolve-env:
+    runs-on: ubuntu-latest
+    outputs:
+      envs: ${{ steps.set-envs.outputs.envs }}
+    steps:
+      - name: Determine environments
+        id: set-envs
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV="${{ github.event.inputs.environment }}"
+            if [[ "$ENV" == "all" ]]; then
+              echo 'envs=["stable","release","int"]' >> "$GITHUB_OUTPUT"
+            else
+              echo "envs=[\"$ENV\"]" >> "$GITHUB_OUTPUT"
+            fi
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo 'envs=["int"]' >> "$GITHUB_OUTPUT"
+          else
+            BRANCH="${{ github.head_ref || github.ref_name }}"
+            case "$BRANCH" in
+              main|master) echo 'envs=["stable"]' >> "$GITHUB_OUTPUT" ;;
+              release)     echo 'envs=["release"]' >> "$GITHUB_OUTPUT" ;;
+              int)         echo 'envs=["int"]' >> "$GITHUB_OUTPUT" ;;
+              *)           echo 'envs=["stable"]' >> "$GITHUB_OUTPUT" ;;
+            esac
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    needs: resolve-env
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJson(needs.resolve-env.outputs.envs) }}
+
+    name: Test ${{ matrix.env }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # Playwright's webServer config auto-starts the server for each project.
+      # In CI, reuseExistingServer is false so it always starts a fresh one.
+      - name: Run Playwright tests (${{ matrix.env }})
+        run: npx playwright test --project=${{ matrix.env }}
+        env:
+          STABLE_USERNAME: ${{ secrets.STABLE_USERNAME }}
+          STABLE_PASSWORD: ${{ secrets.STABLE_PASSWORD }}
+          RELEASE_USERNAME: ${{ secrets.RELEASE_USERNAME }}
+          RELEASE_PASSWORD: ${{ secrets.RELEASE_PASSWORD }}
+          INT_USERNAME: ${{ secrets.INT_USERNAME }}
+          INT_PASSWORD: ${{ secrets.INT_PASSWORD }}
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-${{ matrix.env }}
+          path: playwright-report/
+          retention-days: 30
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: test-results-${{ matrix.env }}
+          path: test-results/
+          retention-days: 7
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: allure-results-${{ matrix.env }}
+          path: allure-results/
+          retention-days: 7
+
+  # Generate Allure report from all envs and deploy to GitHub Pages
+  report:
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+    name: Allure report
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all Allure results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: allure-results-*
+          path: allure-results
+          merge-multiple: true
+
+      - name: Install Allure CLI
+        run: |
+          curl -sL https://github.com/allure-framework/allure2/releases/download/2.30.0/allure-2.30.0.tgz | tar xz
+          echo "$PWD/allure-2.30.0/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch previous Allure history
+        continue-on-error: true
+        run: |
+          git fetch origin gh-pages --depth=1 || true
+          if git show origin/gh-pages:history 2>/dev/null; then
+            mkdir -p allure-results/history
+            git show origin/gh-pages:history/categories-trend.json > allure-results/history/categories-trend.json 2>/dev/null || true
+            git show origin/gh-pages:history/duration-trend.json > allure-results/history/duration-trend.json 2>/dev/null || true
+            git show origin/gh-pages:history/history-trend.json > allure-results/history/history-trend.json 2>/dev/null || true
+            git show origin/gh-pages:history/history.json > allure-results/history/history.json 2>/dev/null || true
+            git show origin/gh-pages:history/retry-trend.json > allure-results/history/retry-trend.json 2>/dev/null || true
+          fi
+
+      - name: Generate Allure report
+        run: allure generate allure-results --clean -o allure-report
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: allure-report
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
+
+  # Merge gate — only runs on PRs targeting main (stable).
+  # Add "Stable gate" as a required status check in branch protection
+  # rules for main to block merges when stable tests fail.
+  stable-gate:
+    runs-on: ubuntu-latest
+    needs: [resolve-env, test]
+    if: >
+      always() &&
+      github.event_name == 'pull_request' &&
+      github.base_ref == 'main'
+    name: Stable gate
+    steps:
+      - name: Check stable result
+        run: |
+          if [[ "${{ needs.test.result }}" == "failure" ]]; then
+            echo "::error::Stable tests failed — merge blocked"
+            exit 1
+          fi
+
+  # Slack notification — opt-in via repository variable SLACK_ENABLED=true
+  notify:
+    runs-on: ubuntu-latest
+    needs: [resolve-env, test]
+    if: always() && vars.SLACK_ENABLED == 'true'
+    name: Slack notify
+    steps:
+      - name: Send Slack notification
+        run: |
+          # Determine test status
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
+            STATUS_EMOJI="✅"
+            STATUS_TEXT="passed"
+            COLOR="good"
+          else
+            STATUS_EMOJI="❌"
+            STATUS_TEXT="failed"
+            COLOR="danger"
+          fi
+
+          # Resolve which envs were tested
+          ENVS='${{ needs.resolve-env.outputs.envs }}'
+
+          # Build Slack payload
+          cat > slack-payload.json << 'SLACKEOF'
+          {
+            "attachments": [
+              {
+                "color": "COLOR_PLACEHOLDER",
+                "blocks": [
+                  {
+                    "type": "header",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "STATUS_EMOJI_PH Playwright Tests STATUS_TEXT_PH",
+                      "emoji": true
+                    }
+                  },
+                  {
+                    "type": "section",
+                    "fields": [
+                      {
+                        "type": "mrkdwn",
+                        "text": "*Repository:*\nREPO_PH"
+                      },
+                      {
+                        "type": "mrkdwn",
+                        "text": "*Branch:*\nBRANCH_PH"
+                      },
+                      {
+                        "type": "mrkdwn",
+                        "text": "*Triggered by:*\nACTOR_PH"
+                      },
+                      {
+                        "type": "mrkdwn",
+                        "text": "*Event:*\nEVENT_PH"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "section",
+                    "fields": [
+                      {
+                        "type": "mrkdwn",
+                        "text": "*Environments tested:*\nENVS_PH"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "actions",
+                    "elements": [
+                      {
+                        "type": "button",
+                        "text": {
+                          "type": "plain_text",
+                          "text": "� Allure Report",
+                          "emoji": true
+                        },
+                        "url": "ALLURE_URL_PH"
+                      },
+                      {
+                        "type": "button",
+                        "text": {
+                          "type": "plain_text",
+                          "text": "�🔗 Workflow Run",
+                          "emoji": true
+                        },
+                        "url": "WORKFLOW_URL_PH"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+          SLACKEOF
+
+          # Replace placeholders with actual values
+          sed -i "s|COLOR_PLACEHOLDER|${COLOR}|g" slack-payload.json
+          sed -i "s|STATUS_EMOJI_PH|${STATUS_EMOJI}|g" slack-payload.json
+          sed -i "s|STATUS_TEXT_PH|${STATUS_TEXT}|g" slack-payload.json
+          sed -i "s|REPO_PH|${{ github.repository }}|g" slack-payload.json
+          sed -i "s|BRANCH_PH|${{ github.ref_name }}|g" slack-payload.json
+          sed -i "s|ACTOR_PH|${{ github.actor }}|g" slack-payload.json
+          sed -i "s|EVENT_PH|${{ github.event_name }}|g" slack-payload.json
+          sed -i "s|ENVS_PH|${ENVS}|g" slack-payload.json
+          sed -i "s|ALLURE_URL_PH|https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/|g" slack-payload.json
+          sed -i "s|WORKFLOW_URL_PH|${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|g" slack-payload.json
+
+          # Send to Slack
+          curl -sf -X POST \
+            -H 'Content-type: application/json' \
+            --data @slack-payload.json \
+            ${{ secrets.SLACK_WEBHOOK_URL }}

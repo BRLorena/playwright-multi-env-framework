@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TODO App - Release</title>
+  <link rel="stylesheet" href="/styles/base.css">
+  <link rel="stylesheet" href="/styles/release.css">
+</head>
+<body>
+  <div class="container">
+    <h1>TODO List <span class="env-badge">Release</span></h1>
+
+    <!-- RELEASE: form uses class-based selectors, card layout, modal edit -->
+    <form class="todo-form add-todo-form">
+      <input type="text" class="new-todo-input" placeholder="Add a new task..." autocomplete="off">
+      <button type="submit" class="add-card">Add Task</button>
+    </form>
+
+    <div class="todo-cards" id="todo-cards"></div>
+    <p class="empty-state" id="empty-msg">No tasks yet. Create your first one!</p>
+
+    <!-- Modal for editing (release-specific) -->
+    <div class="modal-overlay" id="edit-modal">
+      <div class="modal">
+        <h2>Edit Task</h2>
+        <input type="text" id="modal-edit-input" placeholder="Task title">
+        <div class="modal-actions">
+          <button class="cancel-btn" id="modal-cancel">Cancel</button>
+          <button class="save-btn" id="modal-save">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '/api/todos';
+    const cardsContainer = document.getElementById('todo-cards');
+    const form = document.querySelector('.add-todo-form');
+    const input = document.querySelector('.new-todo-input');
+    const emptyMsg = document.getElementById('empty-msg');
+    const modal = document.getElementById('edit-modal');
+    const modalInput = document.getElementById('modal-edit-input');
+    const modalSave = document.getElementById('modal-save');
+    const modalCancel = document.getElementById('modal-cancel');
+    let editingId = null;
+
+    // Auth: include token in all requests
+    const authToken = localStorage.getItem('auth-token');
+    if (!authToken) { window.location.href = '/login'; }
+    const authHeaders = { 'Authorization': `Bearer ${authToken}` };
+
+    async function authFetch(url, opts = {}) {
+      opts.headers = { ...opts.headers, ...authHeaders };
+      const res = await fetch(url, opts);
+      if (res.status === 401) { localStorage.removeItem('auth-token'); window.location.href = '/login'; }
+      return res;
+    }
+
+    async function loadTodos() {
+      const res = await authFetch(API);
+      const todos = await res.json();
+      renderTodos(todos);
+    }
+
+    function renderTodos(todos) {
+      cardsContainer.innerHTML = '';
+      emptyMsg.style.display = todos.length === 0 ? 'block' : 'none';
+      todos.forEach(todo => {
+        const card = document.createElement('div');
+        card.className = `todo-card${todo.completed ? ' completed' : ''}`;
+        card.dataset.id = todo.id;
+        card.innerHTML = `
+          <input type="checkbox" class="card-checkbox" ${todo.completed ? 'checked' : ''}>
+          <span class="card-title">${escapeHtml(todo.title)}</span>
+          <div class="card-actions">
+            <button class="edit-icon" title="Edit">✏️</button>
+            <button class="delete-icon" title="Delete">🗑️</button>
+          </div>
+        `;
+        cardsContainer.appendChild(card);
+      });
+    }
+
+    // CREATE
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = input.value.trim();
+      if (!title) return;
+      await authFetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title })
+      });
+      input.value = '';
+      loadTodos();
+    });
+
+    // TOGGLE / EDIT / DELETE via delegation
+    cardsContainer.addEventListener('click', async (e) => {
+      const card = e.target.closest('.todo-card');
+      if (!card) return;
+      const id = card.dataset.id;
+
+      // Toggle
+      if (e.target.classList.contains('card-checkbox')) {
+        await authFetch(`${API}/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ completed: e.target.checked })
+        });
+        loadTodos();
+      }
+
+      // Delete
+      if (e.target.classList.contains('delete-icon')) {
+        await authFetch(`${API}/${id}`, { method: 'DELETE' });
+        loadTodos();
+      }
+
+      // MODAL EDIT (release-specific)
+      if (e.target.classList.contains('edit-icon')) {
+        editingId = id;
+        const titleEl = card.querySelector('.card-title');
+        modalInput.value = titleEl.textContent;
+        modal.classList.add('active');
+        modalInput.focus();
+      }
+    });
+
+    // Modal save
+    modalSave.addEventListener('click', async () => {
+      if (!editingId) return;
+      const newTitle = modalInput.value.trim();
+      if (newTitle) {
+        await authFetch(`${API}/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: newTitle })
+        });
+      }
+      closeModal();
+      loadTodos();
+    });
+
+    // Modal cancel
+    modalCancel.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+    // Modal enter to save
+    modalInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') modalSave.click();
+    });
+
+    function closeModal() {
+      modal.classList.remove('active');
+      editingId = null;
+    }
+
+    function escapeHtml(text) {
+      const d = document.createElement('div');
+      d.textContent = text;
+      return d.innerHTML;
+    }
+
+    loadTodos();
+  </script>
+</body>
+</html>

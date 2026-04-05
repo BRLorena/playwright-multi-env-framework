@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Stable</title>
+  <link rel="stylesheet" href="/styles/base.css">
+  <link rel="stylesheet" href="/styles/stable.css">
+  <style>
+    .login-form {
+      display: flex; flex-direction: column; gap: 12px;
+      max-width: 360px; margin: 4rem auto; padding: 2rem;
+      background: white; border-radius: 8px; border: 1px solid #e0e0e0;
+    }
+    .login-form h2 { text-align: center; margin-bottom: 8px; }
+    .login-form input {
+      padding: 10px 14px; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem;
+    }
+    .login-form button {
+      padding: 10px 20px; background: #4caf50; color: white; border: none;
+      border-radius: 4px; cursor: pointer; font-size: 1rem;
+    }
+    .login-form button:hover { background: #43a047; }
+    .login-error { color: #f44336; text-align: center; display: none; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>TODO List <span class="env-badge">Stable</span></h1>
+    <form class="login-form" id="login-form">
+      <h2>Sign In</h2>
+      <input type="text" id="login-username" placeholder="Username" autocomplete="off" required>
+      <input type="password" id="login-password" placeholder="Password" required>
+      <button type="submit" id="login-submit">Login</button>
+      <p class="login-error" id="login-error">Invalid username or password</p>
+    </form>
+  </div>
+  <script>
+    const form = document.getElementById('login-form');
+    const errorMsg = document.getElementById('login-error');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorMsg.style.display = 'none';
+      const username = document.getElementById('login-username').value;
+      const password = document.getElementById('login-password').value;
+
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      if (res.ok) {
+        const { token } = await res.json();
+        localStorage.setItem('auth-token', token);
+        window.location.href = '/';
+      } else {
+        errorMsg.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>
