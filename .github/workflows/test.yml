@@ -156,12 +156,22 @@ jobs:
       - name: Generate Allure report
         run: allure generate allure-results --clean -o allure-report
 
+      - name: Upload Allure report artifact
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: allure-report
+          path: allure-report/
+          retention-days: 30
+
       - name: Upload Pages artifact
+        if: github.event_name != 'schedule'
         uses: actions/upload-pages-artifact@v3
         with:
           path: allure-report
 
       - name: Deploy to GitHub Pages
+        if: github.event_name != 'schedule'
         uses: actions/deploy-pages@v4
 
   # Merge gate — only runs on PRs targeting main (stable).
@@ -258,7 +268,7 @@ jobs:
                         "type": "button",
                         "text": {
                           "type": "plain_text",
-                          "text": "� Allure Report",
+                          "text": "Allure Report",
                           "emoji": true
                         },
                         "url": "ALLURE_URL_PH"
@@ -267,7 +277,7 @@ jobs:
                         "type": "button",
                         "text": {
                           "type": "plain_text",
-                          "text": "�🔗 Workflow Run",
+                          "text": "Workflow Run",
                           "emoji": true
                         },
                         "url": "WORKFLOW_URL_PH"
@@ -296,4 +306,4 @@ jobs:
           curl -sf -X POST \
             -H 'Content-type: application/json' \
             --data @slack-payload.json \
-            ${{ secrets.SLACK_WEBHOOK_URL }}
+            "${{ secrets.SLACK_WEBHOOK_URL }}"
