@@ -207,109 +207,92 @@ jobs:
     name: Slack notify
     steps:
       - name: Send Slack notification
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
+          if [[ -z "$SLACK_WEBHOOK_URL" ]]; then
+            echo "::warning::SLACK_WEBHOOK_URL secret is not set — skipping notification"
+            exit 0
+          fi
+
           # Determine test status
           if [[ "${{ needs.test.result }}" == "success" ]]; then
-            STATUS_EMOJI="✅"
+            STATUS_EMOJI="white_check_mark"
             STATUS_TEXT="passed"
             COLOR="good"
           else
-            STATUS_EMOJI="❌"
+            STATUS_EMOJI="x"
             STATUS_TEXT="failed"
             COLOR="danger"
           fi
 
-          # Resolve which envs were tested
           ENVS='${{ needs.resolve-env.outputs.envs }}'
+          ALLURE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          # Build Slack payload
-          cat > slack-payload.json << 'SLACKEOF'
-          {
-            "attachments": [
-              {
-                "color": "COLOR_PLACEHOLDER",
+          # Build payload using jq to guarantee valid JSON
+          jq -n \
+            --arg color "$COLOR" \
+            --arg emoji ":${STATUS_EMOJI}:" \
+            --arg status "$STATUS_TEXT" \
+            --arg repo "${{ github.repository }}" \
+            --arg branch "${{ github.ref_name }}" \
+            --arg actor "${{ github.actor }}" \
+            --arg event "${{ github.event_name }}" \
+            --arg envs "$ENVS" \
+            --arg allure_url "$ALLURE_URL" \
+            --arg workflow_url "$WORKFLOW_URL" \
+            '{
+              "attachments": [{
+                "color": $color,
                 "blocks": [
                   {
                     "type": "header",
-                    "text": {
-                      "type": "plain_text",
-                      "text": "STATUS_EMOJI_PH Playwright Tests STATUS_TEXT_PH",
-                      "emoji": true
-                    }
+                    "text": { "type": "plain_text", "text": "\($emoji) Playwright Tests \($status)", "emoji": true }
                   },
                   {
                     "type": "section",
                     "fields": [
-                      {
-                        "type": "mrkdwn",
-                        "text": "*Repository:*\nREPO_PH"
-                      },
-                      {
-                        "type": "mrkdwn",
-                        "text": "*Branch:*\nBRANCH_PH"
-                      },
-                      {
-                        "type": "mrkdwn",
-                        "text": "*Triggered by:*\nACTOR_PH"
-                      },
-                      {
-                        "type": "mrkdwn",
-                        "text": "*Event:*\nEVENT_PH"
-                      }
+                      { "type": "mrkdwn", "text": "*Repository:*\n\($repo)" },
+                      { "type": "mrkdwn", "text": "*Branch:*\n\($branch)" },
+                      { "type": "mrkdwn", "text": "*Triggered by:*\n\($actor)" },
+                      { "type": "mrkdwn", "text": "*Event:*\n\($event)" }
                     ]
                   },
                   {
                     "type": "section",
                     "fields": [
-                      {
-                        "type": "mrkdwn",
-                        "text": "*Environments tested:*\nENVS_PH"
-                      }
+                      { "type": "mrkdwn", "text": "*Environments tested:*\n\($envs)" }
                     ]
                   },
                   {
                     "type": "actions",
                     "elements": [
-                      {
-                        "type": "button",
-                        "text": {
-                          "type": "plain_text",
-                          "text": "Allure Report",
-                          "emoji": true
-                        },
-                        "url": "ALLURE_URL_PH"
-                      },
-                      {
-                        "type": "button",
-                        "text": {
-                          "type": "plain_text",
-                          "text": "Workflow Run",
-                          "emoji": true
-                        },
-                        "url": "WORKFLOW_URL_PH"
-                      }
+                      { "type": "button", "text": { "type": "plain_text", "text": "Allure Report", "emoji": true }, "url": $allure_url },
+                      { "type": "button", "text": { "type": "plain_text", "text": "Workflow Run", "emoji": true }, "url": $workflow_url }
                     ]
                   }
                 ]
-              }
-            ]
-          }
-          SLACKEOF
+              }]
+            }' > slack-payload.json
 
-          # Replace placeholders with actual values
-          sed -i "s|COLOR_PLACEHOLDER|${COLOR}|g" slack-payload.json
-          sed -i "s|STATUS_EMOJI_PH|${STATUS_EMOJI}|g" slack-payload.json
-          sed -i "s|STATUS_TEXT_PH|${STATUS_TEXT}|g" slack-payload.json
-          sed -i "s|REPO_PH|${{ github.repository }}|g" slack-payload.json
-          sed -i "s|BRANCH_PH|${{ github.ref_name }}|g" slack-payload.json
-          sed -i "s|ACTOR_PH|${{ github.actor }}|g" slack-payload.json
-          sed -i "s|EVENT_PH|${{ github.event_name }}|g" slack-payload.json
-          sed -i "s|ENVS_PH|${ENVS}|g" slack-payload.json
-          sed -i "s|ALLURE_URL_PH|https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/|g" slack-payload.json
-          sed -i "s|WORKFLOW_URL_PH|${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|g" slack-payload.json
+          echo "::group::Slack payload"
+          cat slack-payload.json
+          echo "::endgroup::"
 
-          # Send to Slack
-          curl -sf -X POST \
+          # Send to Slack — show response body on failure for debugging
+          HTTP_CODE=$(curl -s -o response.txt -w '%{http_code}' -X POST \
             -H 'Content-type: application/json' \
             --data @slack-payload.json \
-            "${{ secrets.SLACK_WEBHOOK_URL }}"
+            "$SLACK_WEBHOOK_URL")
+
+          cat response.txt
+          echo ""
+
+          if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
+            echo "::error::Slack returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "Slack notification sent (HTTP $HTTP_CODE)"
