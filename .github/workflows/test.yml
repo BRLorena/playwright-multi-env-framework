@@ -88,7 +88,23 @@ jobs:
       # Playwright's webServer config auto-starts the server for each project.
       # In CI, reuseExistingServer is false so it always starts a fresh one.
       - name: Run Playwright tests (${{ matrix.env }})
-        run: npx playwright test --project=${{ matrix.env }}
+        id: run-tests
+        run: |
+          set +e
+          npx playwright test --project=${{ matrix.env }} 2>&1 | tee playwright-output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          # Parse summary line: e.g. "16 passed", "14 passed, 2 failed"
+          PASSED=$(grep -oP '\d+(?= passed)' playwright-output.txt | tail -1 || echo 0)
+          FAILED=$(grep -oP '\d+(?= failed)' playwright-output.txt | tail -1 || echo 0)
+          SKIPPED=$(grep -oP '\d+(?= skipped)' playwright-output.txt | tail -1 || echo 0)
+          TOTAL=$((${PASSED:-0} + ${FAILED:-0} + ${SKIPPED:-0}))
+
+          echo '{"env":"${{ matrix.env }}","passed":'${PASSED:-0}',"failed":'${FAILED:-0}',"skipped":'${SKIPPED:-0}',"total":'${TOTAL}'}' > test-summary-${{ matrix.env }}.json
+          cat test-summary-${{ matrix.env }}.json
+
+          exit $EXIT_CODE
         env:
           STABLE_USERNAME: ${{ secrets.STABLE_USERNAME }}
           STABLE_PASSWORD: ${{ secrets.STABLE_PASSWORD }}
@@ -96,6 +112,14 @@ jobs:
           RELEASE_PASSWORD: ${{ secrets.RELEASE_PASSWORD }}
           INT_USERNAME: ${{ secrets.INT_USERNAME }}
           INT_PASSWORD: ${{ secrets.INT_PASSWORD }}
+
+      - name: Upload test summary
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: test-summary-${{ matrix.env }}
+          path: test-summary-${{ matrix.env }}.json
+          retention-days: 7
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
@@ -206,6 +230,14 @@ jobs:
     if: always()
     name: Slack notify
     steps:
+      - name: Download test summaries
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: test-summary-*
+          path: summaries
+          merge-multiple: true
+
       - name: Send Slack notification
         continue-on-error: true
         env:
@@ -227,6 +259,16 @@ jobs:
             COLOR="danger"
           fi
 
+          # Aggregate test counts from summaries
+          TOTAL=0 PASSED=0 FAILED=0 SKIPPED=0
+          if ls summaries/test-summary-*.json 1>/dev/null 2>&1; then
+            TOTAL=$(jq -s '[.[].total] | add' summaries/test-summary-*.json)
+            PASSED=$(jq -s '[.[].passed] | add' summaries/test-summary-*.json)
+            FAILED=$(jq -s '[.[].failed] | add' summaries/test-summary-*.json)
+            SKIPPED=$(jq -s '[.[].skipped] | add' summaries/test-summary-*.json)
+          fi
+          RESULTS="Total: ${TOTAL}  |  :white_check_mark: ${PASSED} passed  |  :x: ${FAILED} failed  |  :fast_forward: ${SKIPPED} skipped"
+
           ENVS='${{ needs.resolve-env.outputs.envs }}'
           ALLURE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
           WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -241,6 +283,7 @@ jobs:
             --arg actor "${{ github.actor }}" \
             --arg event "${{ github.event_name }}" \
             --arg envs "$ENVS" \
+            --arg results "$RESULTS" \
             --arg allure_url "$ALLURE_URL" \
             --arg workflow_url "$WORKFLOW_URL" \
             '{
@@ -265,6 +308,10 @@ jobs:
                     "fields": [
                       { "type": "mrkdwn", "text": "*Environments tested:*\n\($envs)" }
                     ]
+                  },
+                  {
+                    "type": "section",
+                    "text": { "type": "mrkdwn", "text": "*Test Results:*\n\($results)" }
                   },
                   {
                     "type": "actions",
