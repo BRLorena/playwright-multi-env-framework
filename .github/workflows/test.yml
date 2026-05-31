@@ -10,10 +10,6 @@ on:
     branches: [main, release, int]
   pull_request:
     branches: [main, release, int]
-  schedule:
-    # Nightly: stable at 1am UTC, int at 2am UTC
-    - cron: "0 1 * * *"
-    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       environment:
@@ -43,13 +39,6 @@ jobs:
               echo 'envs=["stable","release","int"]' >> "$GITHUB_OUTPUT"
             else
               echo "envs=[\"$ENV\"]" >> "$GITHUB_OUTPUT"
-            fi
-          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
-            HOUR=$(date -u +"%H")
-            if [[ "$HOUR" == "01" ]]; then
-              echo 'envs=["stable"]' >> "$GITHUB_OUTPUT"
-            else
-              echo 'envs=["int"]' >> "$GITHUB_OUTPUT"
             fi
           else
             BRANCH="${{ github.head_ref || github.ref_name }}"
@@ -195,13 +184,11 @@ jobs:
           retention-days: 30
 
       - name: Upload Pages artifact
-        if: github.event_name != 'schedule'
         uses: actions/upload-pages-artifact@v3
         with:
           path: allure-report
 
       - name: Deploy to GitHub Pages
-        if: github.event_name != 'schedule'
         uses: actions/deploy-pages@v4
 
   # Merge gate — only runs on PRs targeting main (stable).
