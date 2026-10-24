@@ -19,7 +19,8 @@ const validTokens = new Set<string>();
 
 // POST /api/login
 authRouter.post("/", (req: Request, res: Response) => {
-  const { username, password } = req.body;
+  // Express 5 leaves req.body undefined when the request has no body
+  const { username, password } = req.body ?? {};
   const envName = process.env.ENV_NAME || "int";
   const creds = getCredentials(envName);
 

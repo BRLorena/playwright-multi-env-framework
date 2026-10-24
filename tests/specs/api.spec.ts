@@ -50,6 +50,15 @@ test.describe("Todos API @all", () => {
     expect(res.status()).toBe(400);
   });
 
+  test("should reject a create request with no body", async ({
+    request,
+    authHeaders,
+  }) => {
+    const res = await request.post("/api/todos", { headers: authHeaders });
+
+    expect(res.status()).toBe(400);
+  });
+
   test("should return 404 for an unknown todo", async ({
     request,
     authHeaders,
@@ -76,6 +85,12 @@ test.describe("Todos API @all", () => {
     const res = await request.post("/api/login", {
       data: { username, password: "wrong-password" },
     });
+
+    expect(res.status()).toBe(401);
+  });
+
+  test("should return 401 for a login with no body", async ({ request }) => {
+    const res = await request.post("/api/login");
 
     expect(res.status()).toBe(401);
   });

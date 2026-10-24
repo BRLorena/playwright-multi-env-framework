@@ -40,7 +40,8 @@ todoRouter.get("/:id", (req: Request, res: Response) => {
 
 // POST create todo
 todoRouter.post("/", (req: Request, res: Response) => {
-  const { title } = req.body;
+  // Express 5 leaves req.body undefined when the request has no body
+  const { title } = req.body ?? {};
   if (!title || typeof title !== "string" || title.trim().length === 0) {
     return res.status(400).json({ error: "Title is required" });
   }
@@ -61,7 +62,7 @@ todoRouter.put("/:id", (req: Request, res: Response) => {
   if (index === -1) {
     return res.status(404).json({ error: "Todo not found" });
   }
-  const { title, completed } = req.body;
+  const { title, completed } = req.body ?? {};
   if (title !== undefined) {
     if (typeof title !== "string" || title.trim().length === 0) {
       return res
