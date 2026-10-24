@@ -98,7 +98,7 @@
         item.dataset.testid = `todo-${todo.id}`;
         item.dataset.id = todo.id;
         item.innerHTML = `
-          <input type="checkbox" data-testid="toggle-${todo.id}" ${todo.completed ? 'checked' : ''}>
+          <input type="checkbox" data-testid="toggle-${todo.id}" aria-label="Complete ${escapeHtml(todo.title)}" ${todo.completed ? 'checked' : ''}>
           <span class="item-text" data-testid="text-${todo.id}">${escapeHtml(todo.title)}</span>
           <div class="item-actions">
             <button class="action-edit" data-testid="edit-${todo.id}">Edit</button>
@@ -193,7 +193,7 @@
     function escapeHtml(text) {
       const d = document.createElement('div');
       d.textContent = text;
-      return d.innerHTML;
+      return d.innerHTML.replace(/"/g, '&quot;');
     }
 
     loadTodos();

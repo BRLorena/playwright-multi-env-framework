@@ -54,7 +54,7 @@
         li.dataset.id = todo.id;
         if (todo.completed) li.classList.add('completed');
         li.innerHTML = `
-          <input type="checkbox" class="toggle-checkbox" ${todo.completed ? 'checked' : ''}>
+          <input type="checkbox" class="toggle-checkbox" aria-label="Complete ${escapeHtml(todo.title)}" ${todo.completed ? 'checked' : ''}>
           <span class="todo-text">${escapeHtml(todo.title)}</span>
           <button class="edit-btn">Edit</button>
           <button class="delete-btn">Delete</button>
@@ -106,6 +106,7 @@
         const editInput = document.createElement('input');
         editInput.type = 'text';
         editInput.className = 'inline-edit';
+        editInput.setAttribute('aria-label', 'Edit title');
         editInput.value = currentText;
         textSpan.style.display = 'none';
         textSpan.parentNode.insertBefore(editInput, textSpan.nextSibling);
@@ -138,7 +139,7 @@
     function escapeHtml(text) {
       const d = document.createElement('div');
       d.textContent = text;
-      return d.innerHTML;
+      return d.innerHTML.replace(/"/g, '&quot;');
     }
 
     loadTodos();
