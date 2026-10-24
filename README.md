@@ -3,9 +3,24 @@
 [![Playwright Multi-Environment Tests](https://github.com/BRLorena/playwright-multi-env-framework/actions/workflows/test.yml/badge.svg)](https://github.com/BRLorena/playwright-multi-env-framework/actions/workflows/test.yml)
 [![Allure Report](https://img.shields.io/badge/Allure-Report-yellow)](https://brlorena.github.io/playwright-multi-env-framework/)
 
-> A production-grade Playwright test framework for a multi-environment web app — demonstrating how QA automation scales across stable, release, and integration environments with auth, CI/CD, and branch-scoped test execution.
+> A Playwright + TypeScript framework that runs one test suite against three environments with different UIs, selectors and edit flows. It covers UI, API, auth and accessibility tests, runs them in parallel with branch-scoped CI, and blocks merges when stable fails.
 
 **📊 [Live Allure report](https://brlorena.github.io/playwright-multi-env-framework/)**: all three environments, refreshed daily from `main`, with history and trends.
+
+---
+
+## Results
+
+| | Result |
+| --- | --- |
+| **Tests** | 81 across 3 environments (26 stable, 27 release, 28 int): UI, API, auth and accessibility |
+| **Speed** | Full suite in about 19s locally (fully parallel); each environment in about 6s in CI |
+| **Stability** | 405 of 405 passed in a stress run (5 repeats, 8 workers), with no flaky tests and no sleeps |
+| **Failing fast** | A broken selector fails CI in about 2.5 min instead of 16 ([PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2)) |
+| **Merge gate** | PRs to `main` need stable tests and lint to pass, enforced by branch protection |
+| **Accessibility** | Every screen of all three UIs passes axe-core WCAG 2.1 AA |
+
+![The same TODO app in three environments: stable (classic list, inline edit, id selectors), release (cards, modal edit, class selectors) and int (dark theme with filters, modal edit, data-testid)](docs/environments.png)
 
 ---
 
@@ -18,6 +33,7 @@ Most QA portfolios show tests against a single URL. Real products have multiple 
 - How to run the whole suite **fully in parallel** without tests sharing data
 - How to wire **branch-aware CI pipelines** that run only the relevant environment's tests
 - How to **block merges** when the stable environment's tests fail
+- How to make **accessibility** part of the regression suite, not a one-off audit
 
 ---
 
@@ -41,16 +57,18 @@ tests/
     ui-variant.spec.ts      Env-specific UI tests (@stable/@release/@int)
     auth.spec.ts            Login flow: redirect, valid login, wrong password (@all)
     api.spec.ts             API contract: validation, 401/404, session isolation (@all)
+    a11y.spec.ts            axe-core WCAG 2.1 AA scans of every screen (@all)
   pages/
     todo.page.ts            Page Object Model, env-aware, exposes locators
     login.page.ts           Login page object
   helpers/
     selectors.ts            Per-env selector map (the key abstraction)
+    a11y.ts                 axe-core scan returning readable violations
   fixtures/
     todo.fixture.ts         Per-worker login, typed envName option, TodoPage + clean state
 ```
 
-**69 tests** across the three environments (22 stable, 23 release, 24 int): UI, API and auth.
+**81 tests** across the three environments (26 stable, 27 release, 28 int): UI, API, auth and accessibility.
 
 ### Environment matrix
 
@@ -70,11 +88,11 @@ tests/
 
 ### 2. Auth with `storageState`, one session per worker
 
-Each Playwright worker logs in once through the real login page and every test in that worker reuses its `storageState` (Playwright's [one account per parallel worker](https://playwright.dev/docs/auth#moderate-one-account-per-parallel-worker) pattern). The app keeps one todo list per session, so workers never see each other's data and the suite runs **fully parallel**: all 69 tests in about 19s locally, each env in about 6s in CI.
+Each Playwright worker logs in once through the real login page and every test in that worker reuses its `storageState` (Playwright's [one account per parallel worker](https://playwright.dev/docs/auth#moderate-one-account-per-parallel-worker) pattern). The app keeps one todo list per session, so workers never see each other's data and the suite runs **fully parallel**: all 81 tests in about 19s locally, each env in about 6s in CI.
 
 ### 3. No sleeps, only web-first assertions
 
-Page objects expose locators, and actions wait for the app to re-fetch the list after a change, instead of `waitForTimeout` or `waitForSelector`. Specs assert with auto-retrying expects (`toHaveText`, `toBeChecked`, `toHaveCount`). [`eslint-plugin-playwright`](https://github.com/playwright-community/eslint-plugin-playwright) enforces this in CI. The suite passed 345 of 345 runs (5 repeats, 8 workers) with no flaky tests.
+Page objects expose locators, and actions wait for the app to re-fetch the list after a change, instead of `waitForTimeout` or `waitForSelector`. Specs assert with auto-retrying expects (`toHaveText`, `toBeChecked`, `toHaveCount`). [`eslint-plugin-playwright`](https://github.com/playwright-community/eslint-plugin-playwright) enforces this in CI. The suite passed 405 of 405 runs (5 repeats, 8 workers) with no flaky tests.
 
 ### 4. Environments are data, not code
 
@@ -82,10 +100,18 @@ Page objects expose locators, and actions wait for the app to re-fetch the list 
 
 ### 5. Branch → environment mapping in CI
 
-```
-main     →  stable tests only
-release  →  release tests only
-int      →  int tests only
+```mermaid
+flowchart LR
+    T["push / pull request"] --> R{"resolve-env<br/>(PR: target branch)"}
+    S["daily schedule<br/>manual: all"] --> A["stable + release + int"]
+    R -->|main| ST[stable tests]
+    R -->|release| RE[release tests]
+    R -->|int| IN[int tests]
+    ST --> G{"Stable gate<br/>(required check)"}
+    L[Lint: tsc, ESLint, Prettier] --> G
+    G -->|pass| M[merge allowed]
+    G -->|fail, cancelled or skipped| B[merge blocked]
+    ST --> P["Allure report on GitHub Pages<br/>(main only)"]
 ```
 
 Pull requests run the tests of the branch they merge **into**, so a PR to `main` always runs stable. Pushing to `release` won't run stable tests. The daily schedule and a manual `all` run cover all three environments.
@@ -104,6 +130,12 @@ A dedicated `Stable gate` job runs on every PR to `main` and is a **required sta
 ![Workflow run: resolve-env → Test stable (failed) → Stable gate (failed), with the Allure report still published](docs/pipeline-run.png)
 
 </details>
+
+### 7. Accessibility as a regression test
+
+[tests/specs/a11y.spec.ts](tests/specs/a11y.spec.ts) runs [axe-core](https://github.com/dequelabs/axe-core) against WCAG 2.1 A/AA on every screen of every environment: the list with active and completed items, edit mode (inline or modal) and the login page with an error. A failure lists each rule and element, e.g. `color-contrast: #add-todo`.
+
+The first scan found violations in all three UIs: unlabelled checkboxes and low-contrast buttons, badges and completed items. They were fixed in the app, and the scan now runs on every PR, so a new one blocks the merge like any other failing test.
 
 ---
 
@@ -189,7 +221,7 @@ The `Playwright webServer` config starts and stops the app automatically in CI �
 ## Tech stack
 
 - **App:** Node.js, Express, TypeScript
-- **Tests:** Playwright 1.64, TypeScript, Allure
+- **Tests:** Playwright 1.64, TypeScript, Allure, axe-core
 - **Quality:** ESLint (typescript-eslint, eslint-plugin-playwright), Prettier, `tsc` type-check
-- **Auth:** JWT-style token in `localStorage`, per-env credentials via env vars
+- **Auth:** Bearer session token in `localStorage`, per-env credentials via env vars
 - **CI:** GitHub Actions with matrix strategy and branch-scoped execution
