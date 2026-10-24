@@ -71,7 +71,7 @@
         card.className = `todo-card${todo.completed ? ' completed' : ''}`;
         card.dataset.id = todo.id;
         card.innerHTML = `
-          <input type="checkbox" class="card-checkbox" ${todo.completed ? 'checked' : ''}>
+          <input type="checkbox" class="card-checkbox" aria-label="Complete ${escapeHtml(todo.title)}" ${todo.completed ? 'checked' : ''}>
           <span class="card-title">${escapeHtml(todo.title)}</span>
           <div class="card-actions">
             <button class="edit-icon" title="Edit">✏️</button>
@@ -161,7 +161,7 @@
     function escapeHtml(text) {
       const d = document.createElement('div');
       d.textContent = text;
-      return d.innerHTML;
+      return d.innerHTML.replace(/"/g, '&quot;');
     }
 
     loadTodos();
