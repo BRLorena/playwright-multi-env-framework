@@ -4,6 +4,8 @@ name: Playwright Multi-Environment Tests
 #   main    → stable (port 3001)
 #   release → release (port 3002)
 #   int     → int (port 3003)
+# Pull requests test the environment of the branch they merge INTO.
+# The daily schedule runs all three and refreshes the public Allure report.
 
 on:
   push:
@@ -22,6 +24,13 @@ on:
           - stable
           - release
           - int
+  schedule:
+    - cron: "0 6 * * *"
+
+# Only one Pages publish at a time per ref; a new run doesn't cancel one that is publishing.
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   # Resolve which environment(s) to test based on the trigger
@@ -33,7 +42,9 @@ jobs:
       - name: Determine environments
         id: set-envs
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo 'envs=["stable","release","int"]' >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             ENV="${{ github.event.inputs.environment }}"
             if [[ "$ENV" == "all" ]]; then
               echo 'envs=["stable","release","int"]' >> "$GITHUB_OUTPUT"
@@ -41,7 +52,8 @@ jobs:
               echo "envs=[\"$ENV\"]" >> "$GITHUB_OUTPUT"
             fi
           else
-            BRANCH="${{ github.head_ref || github.ref_name }}"
+            # base_ref = target branch of a PR; ref_name = pushed branch
+            BRANCH="${{ github.base_ref || github.ref_name }}"
             case "$BRANCH" in
               main|master) echo 'envs=["stable"]' >> "$GITHUB_OUTPUT" ;;
               release)     echo 'envs=["release"]' >> "$GITHUB_OUTPUT" ;;
@@ -134,7 +146,8 @@ jobs:
           path: allure-results/
           retention-days: 7
 
-  # Generate Allure report from all envs and deploy to GitHub Pages
+  # Generate Allure report from all envs; publish to GitHub Pages only from main
+  # (not from PRs or the release/int branches, which would overwrite it with one env).
   report:
     runs-on: ubuntu-latest
     needs: test
@@ -144,6 +157,8 @@ jobs:
       pages: write
       id-token: write
       contents: read
+    env:
+      PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -159,18 +174,15 @@ jobs:
           curl -sL https://github.com/allure-framework/allure2/releases/download/2.30.0/allure-2.30.0.tgz | tar xz
           echo "$PWD/allure-2.30.0/bin" >> "$GITHUB_PATH"
 
-      - name: Fetch previous Allure history
+      # The previous report's history/ folder is served by GitHub Pages; Allure needs it for trends.
+      - name: Download previous Allure history
         continue-on-error: true
         run: |
-          git fetch origin gh-pages --depth=1 || true
-          if git show origin/gh-pages:history 2>/dev/null; then
-            mkdir -p allure-results/history
-            git show origin/gh-pages:history/categories-trend.json > allure-results/history/categories-trend.json 2>/dev/null || true
-            git show origin/gh-pages:history/duration-trend.json > allure-results/history/duration-trend.json 2>/dev/null || true
-            git show origin/gh-pages:history/history-trend.json > allure-results/history/history-trend.json 2>/dev/null || true
-            git show origin/gh-pages:history/history.json > allure-results/history/history.json 2>/dev/null || true
-            git show origin/gh-pages:history/retry-trend.json > allure-results/history/retry-trend.json 2>/dev/null || true
-          fi
+          mkdir -p allure-results/history
+          for f in categories-trend duration-trend history-trend history retry-trend; do
+            curl -fsSL "$PAGES_URL/history/$f.json" -o "allure-results/history/$f.json" \
+              && echo "Downloaded $f.json" || echo "No previous $f.json"
+          done
 
       - name: Generate Allure report
         run: allure generate allure-results --clean -o allure-report
@@ -184,11 +196,13 @@ jobs:
           retention-days: 30
 
       - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: allure-report
 
       - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/deploy-pages@v4
 
   # Merge gate — only runs on PRs targeting main (stable).
@@ -203,12 +217,18 @@ jobs:
       github.base_ref == 'main'
     name: Stable gate
     steps:
+      # Anything but success (failure, cancelled, skipped) blocks the merge.
       - name: Check stable result
         run: |
-          if [[ "${{ needs.test.result }}" == "failure" ]]; then
-            echo "::error::Stable tests failed — merge blocked"
+          if [[ '${{ needs.resolve-env.outputs.envs }}' != '["stable"]' ]]; then
+            echo "::error::Expected stable tests for a PR into main, got ${{ needs.resolve-env.outputs.envs }}"
             exit 1
           fi
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "::error::Stable tests ${{ needs.test.result }} — merge blocked"
+            exit 1
+          fi
+          echo "Stable tests passed"
 
   # Slack notification — runs on every workflow execution
   notify:
