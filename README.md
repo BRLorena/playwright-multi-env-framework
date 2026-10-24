@@ -1,6 +1,11 @@
 # playwright-multi-env-framework
 
+[![Playwright Multi-Environment Tests](https://github.com/BRLorena/playwright-multi-env-framework/actions/workflows/test.yml/badge.svg)](https://github.com/BRLorena/playwright-multi-env-framework/actions/workflows/test.yml)
+[![Allure Report](https://img.shields.io/badge/Allure-Report-yellow)](https://brlorena.github.io/playwright-multi-env-framework/)
+
 > A production-grade Playwright test framework for a multi-environment web app — demonstrating how QA automation scales across stable, release, and integration environments with auth, CI/CD, and branch-scoped test execution.
+
+**📊 [Live Allure report](https://brlorena.github.io/playwright-multi-env-framework/)**: all three environments, refreshed daily from `main`, with history and trends.
 
 ---
 
@@ -68,11 +73,11 @@ release  →  release tests only
 int      →  int tests only
 ```
 
-Pushing to `release` won't run stable tests. The nightly schedule targets `int`. A manual trigger can run any single env or all three.
+Pull requests run the tests of the branch they merge **into**, so a PR to `main` always runs stable. Pushing to `release` won't run stable tests. The daily schedule and a manual `all` run cover all three environments.
 
 ### 4. Merge gate on stable
 
-A dedicated `Stable gate` job in the workflow only runs on PRs to `main`. Add it as a **required status check** in branch protection to block merges when stable tests fail.
+A dedicated `Stable gate` job runs on every PR to `main` and is a **required status check** in branch protection. Any result other than success (failed, cancelled or skipped tests) blocks the merge, and the gate also fails if the PR didn't run the stable suite.
 
 ---
 
@@ -123,9 +128,12 @@ GitHub Actions workflow: [`.github/workflows/test.yml`](.github/workflows/test.y
 
 Triggers:
 
-- `push` / `pull_request` → runs tests for the target branch's environment
-- `schedule` (nightly 2am UTC) → runs `int` tests
+- `push` → runs tests for the pushed branch's environment
+- `pull_request` → runs tests for the target branch's environment (PRs to `main` run stable and must pass the `Stable gate`)
+- `schedule` (daily 6am UTC) → runs all three environments
 - `workflow_dispatch` → manually pick `stable`, `release`, `int`, or `all`
+
+The Allure report is published to [GitHub Pages](https://brlorena.github.io/playwright-multi-env-framework/) only from `main`, so PRs and the `release`/`int` branches never overwrite it. Each run downloads the previous report's history so trends carry over.
 
 The `Playwright webServer` config starts and stops the app automatically in CI — no separate server startup step needed.
 
