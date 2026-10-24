@@ -37,9 +37,7 @@ export class LoginPage {
     await this.submitCredentials(username, password);
     await this.page.waitForURL("/");
     await expect
-      .poll(() =>
-        this.page.evaluate(() => localStorage.getItem("auth-token")),
-      )
+      .poll(() => this.page.evaluate(() => localStorage.getItem("auth-token")))
       .toBeTruthy();
   }
 }

@@ -4,7 +4,10 @@ import { LoginPage } from "../pages/login.page";
 import { EnvName } from "../helpers/selectors";
 import { getCredentials } from "../../config/environments";
 
-type StorageState = Exclude<BrowserContextOptions["storageState"], string | undefined>;
+type StorageState = Exclude<
+  BrowserContextOptions["storageState"],
+  string | undefined
+>;
 
 export type TodoWorkerOptions = {
   /** Environment under test, set per project in playwright.config.ts */
@@ -30,7 +33,10 @@ type TodoFixtures = {
  * from that storageState. The app scopes data to the session, so workers
  * never touch each other's todos and tests run fully in parallel.
  */
-export const test = base.extend<TodoFixtures, TodoWorkerOptions & TodoWorkerFixtures>({
+export const test = base.extend<
+  TodoFixtures,
+  TodoWorkerOptions & TodoWorkerFixtures
+>({
   envName: ["stable", { option: true, scope: "worker" }],
 
   session: [
@@ -42,7 +48,9 @@ export const test = base.extend<TodoFixtures, TodoWorkerOptions & TodoWorkerFixt
       });
       await new LoginPage(page).login(username, password);
       const storageState = await page.context().storageState();
-      const token = await page.evaluate(() => localStorage.getItem("auth-token"));
+      const token = await page.evaluate(() =>
+        localStorage.getItem("auth-token"),
+      );
       await page.close();
       await use({ token: token!, storageState });
     },

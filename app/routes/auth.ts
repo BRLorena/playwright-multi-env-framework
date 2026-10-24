@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 
 const authRouter = Router();
 
@@ -30,7 +30,7 @@ authRouter.post("/", (req: Request, res: Response) => {
   }
 
   if (username === creds.username && password === creds.password) {
-    const token = uuidv4();
+    const token = randomUUID();
     validTokens.add(token);
     return res.json({ token, env: envName });
   }

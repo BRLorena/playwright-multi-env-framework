@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 
 export interface Todo {
   id: string;
@@ -45,7 +45,7 @@ todoRouter.post("/", (req: Request, res: Response) => {
     return res.status(400).json({ error: "Title is required" });
   }
   const todo: Todo = {
-    id: uuidv4(),
+    id: randomUUID(),
     title: title.trim(),
     completed: false,
     createdAt: new Date().toISOString(),
