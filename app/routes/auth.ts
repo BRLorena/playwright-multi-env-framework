@@ -44,6 +44,8 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = authHeader?.replace("Bearer ", "");
 
   if (token && validTokens.has(token)) {
+    // Todo routes scope their data to this session
+    res.locals.token = token;
     return next();
   }
 
