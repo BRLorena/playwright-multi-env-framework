@@ -9,32 +9,27 @@ import { test, expect } from "../fixtures/todo.fixture";
 
 test.describe("TODO CRUD Operations @all", () => {
   test("should show empty state when no todos exist", async ({ todoPage }) => {
-    const isEmpty = await todoPage.isEmptyStateVisible();
-    expect(isEmpty).toBeTruthy();
-    const count = await todoPage.getTodoCount();
-    expect(count).toBe(0);
+    await expect(todoPage.emptyState).toBeVisible();
+    await expect(todoPage.items).toHaveCount(0);
   });
 
   test("should create a new todo", async ({ todoPage }) => {
     await todoPage.addTodo("Buy groceries");
 
-    const count = await todoPage.getTodoCount();
-    expect(count).toBe(1);
-
-    const texts = await todoPage.getTodoTexts();
-    expect(texts).toContain("Buy groceries");
+    await expect(todoPage.itemTexts).toHaveText(["Buy groceries"]);
+    await expect(todoPage.emptyState).toBeHidden();
   });
 
-  test("should create multiple todos", async ({ todoPage }) => {
+  test("should create multiple todos in order", async ({ todoPage }) => {
     await todoPage.addTodo("First task");
     await todoPage.addTodo("Second task");
     await todoPage.addTodo("Third task");
 
-    const count = await todoPage.getTodoCount();
-    expect(count).toBe(3);
-
-    const texts = await todoPage.getTodoTexts();
-    expect(texts).toEqual(["First task", "Second task", "Third task"]);
+    await expect(todoPage.itemTexts).toHaveText([
+      "First task",
+      "Second task",
+      "Third task",
+    ]);
   });
 
   test("should toggle a todo as completed", async ({ todoPage }) => {
@@ -42,20 +37,28 @@ test.describe("TODO CRUD Operations @all", () => {
 
     await todoPage.toggleTodo("Complete me");
 
-    const isCompleted = await todoPage.isTodoCompleted("Complete me");
-    expect(isCompleted).toBeTruthy();
+    await expect(todoPage.checkbox("Complete me")).toBeChecked();
   });
 
   test("should toggle a todo back to active", async ({ todoPage }) => {
     await todoPage.addTodo("Toggle me");
 
-    // Complete it
     await todoPage.toggleTodo("Toggle me");
-    expect(await todoPage.isTodoCompleted("Toggle me")).toBeTruthy();
+    await expect(todoPage.checkbox("Toggle me")).toBeChecked();
 
-    // Un-complete it
     await todoPage.toggleTodo("Toggle me");
-    expect(await todoPage.isTodoCompleted("Toggle me")).toBeFalsy();
+    await expect(todoPage.checkbox("Toggle me")).not.toBeChecked();
+  });
+
+  test("should keep the completed state after a reload", async ({
+    todoPage,
+  }) => {
+    await todoPage.addTodo("Persist me");
+    await todoPage.toggleTodo("Persist me");
+
+    await todoPage.goto();
+
+    await expect(todoPage.checkbox("Persist me")).toBeChecked();
   });
 
   test("should edit a todo title", async ({ todoPage }) => {
@@ -63,9 +66,7 @@ test.describe("TODO CRUD Operations @all", () => {
 
     await todoPage.editTodo("Old title", "New title");
 
-    const texts = await todoPage.getTodoTexts();
-    expect(texts).toContain("New title");
-    expect(texts).not.toContain("Old title");
+    await expect(todoPage.itemTexts).toHaveText(["New title"]);
   });
 
   test("should delete a todo", async ({ todoPage }) => {
@@ -74,12 +75,7 @@ test.describe("TODO CRUD Operations @all", () => {
 
     await todoPage.deleteTodo("Delete me");
 
-    const count = await todoPage.getTodoCount();
-    expect(count).toBe(1);
-
-    const texts = await todoPage.getTodoTexts();
-    expect(texts).not.toContain("Delete me");
-    expect(texts).toContain("Keep me");
+    await expect(todoPage.itemTexts).toHaveText(["Keep me"]);
   });
 
   test("should show empty state after deleting all todos", async ({
@@ -88,30 +84,33 @@ test.describe("TODO CRUD Operations @all", () => {
     await todoPage.addTodo("Only one");
     await todoPage.deleteTodo("Only one");
 
-    const isEmpty = await todoPage.isEmptyStateVisible();
-    expect(isEmpty).toBeTruthy();
+    await expect(todoPage.emptyState).toBeVisible();
+    await expect(todoPage.items).toHaveCount(0);
+  });
+
+  test("should not create a todo with a blank title", async ({ todoPage }) => {
+    await todoPage.input.fill("   ");
+    await todoPage.addButton.click();
+
+    await expect(todoPage.items).toHaveCount(0);
+    await expect(todoPage.emptyState).toBeVisible();
   });
 
   test("full CRUD flow: create, read, update, delete", async ({ todoPage }) => {
-    // CREATE
+    // CREATE + READ
     await todoPage.addTodo("CRUD test item");
-    expect(await todoPage.getTodoCount()).toBe(1);
-
-    // READ
-    const texts1 = await todoPage.getTodoTexts();
-    expect(texts1).toContain("CRUD test item");
+    await expect(todoPage.itemTexts).toHaveText(["CRUD test item"]);
 
     // UPDATE - toggle
     await todoPage.toggleTodo("CRUD test item");
-    expect(await todoPage.isTodoCompleted("CRUD test item")).toBeTruthy();
+    await expect(todoPage.checkbox("CRUD test item")).toBeChecked();
 
     // UPDATE - edit
     await todoPage.editTodo("CRUD test item", "Updated CRUD item");
-    const texts2 = await todoPage.getTodoTexts();
-    expect(texts2).toContain("Updated CRUD item");
+    await expect(todoPage.itemTexts).toHaveText(["Updated CRUD item"]);
 
     // DELETE
     await todoPage.deleteTodo("Updated CRUD item");
-    expect(await todoPage.getTodoCount()).toBe(0);
+    await expect(todoPage.items).toHaveCount(0);
   });
 });

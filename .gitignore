@@ -7,4 +7,4 @@ allure-results/
 allure-report/
 .env
 *.db
-tests/.auth/
+reports/
