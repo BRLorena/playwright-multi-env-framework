@@ -13,9 +13,9 @@
 
 | | Result |
 | --- | --- |
-| **Tests** | 81 across 3 environments (26 stable, 27 release, 28 int): UI, API, auth and accessibility |
+| **Tests** | 87 across 3 environments (28 stable, 29 release, 30 int): UI, API, auth and accessibility |
 | **Speed** | Full suite in about 19s locally (fully parallel); each environment in about 6s in CI |
-| **Stability** | 405 of 405 passed in a stress run (5 repeats, 8 workers), with no flaky tests and no sleeps |
+| **Stability** | 435 of 435 passed in a stress run (5 repeats, 8 workers), with no flaky tests and no sleeps |
 | **Failing fast** | A broken selector fails CI in about 2.5 min instead of 16 ([PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2)) |
 | **Merge gate** | PRs to `main` need stable tests and lint to pass, enforced by branch protection |
 | **Accessibility** | Every screen of all three UIs passes axe-core WCAG 2.1 AA |
@@ -68,7 +68,7 @@ tests/
     todo.fixture.ts         Per-worker login, typed envName option, TodoPage + clean state
 ```
 
-**81 tests** across the three environments (26 stable, 27 release, 28 int): UI, API, auth and accessibility.
+**87 tests** across the three environments (28 stable, 29 release, 30 int): UI, API, auth and accessibility.
 
 ### Environment matrix
 
@@ -88,11 +88,11 @@ tests/
 
 ### 2. Auth with `storageState`, one session per worker
 
-Each Playwright worker logs in once through the real login page and every test in that worker reuses its `storageState` (Playwright's [one account per parallel worker](https://playwright.dev/docs/auth#moderate-one-account-per-parallel-worker) pattern). The app keeps one todo list per session, so workers never see each other's data and the suite runs **fully parallel**: all 81 tests in about 19s locally, each env in about 6s in CI.
+Each Playwright worker logs in once through the real login page and every test in that worker reuses its `storageState` (Playwright's [one account per parallel worker](https://playwright.dev/docs/auth#moderate-one-account-per-parallel-worker) pattern). The app keeps one todo list per session, so workers never see each other's data and the suite runs **fully parallel**: all 87 tests in about 19s locally, each env in about 6s in CI.
 
 ### 3. No sleeps, only web-first assertions
 
-Page objects expose locators, and actions wait for the app to re-fetch the list after a change, instead of `waitForTimeout` or `waitForSelector`. Specs assert with auto-retrying expects (`toHaveText`, `toBeChecked`, `toHaveCount`). [`eslint-plugin-playwright`](https://github.com/playwright-community/eslint-plugin-playwright) enforces this in CI. The suite passed 405 of 405 runs (5 repeats, 8 workers) with no flaky tests.
+Page objects expose locators, and actions wait for the app to re-fetch the list after a change, instead of `waitForTimeout` or `waitForSelector`. Specs assert with auto-retrying expects (`toHaveText`, `toBeChecked`, `toHaveCount`). [`eslint-plugin-playwright`](https://github.com/playwright-community/eslint-plugin-playwright) enforces this in CI. The suite passed 435 of 435 runs (5 repeats, 8 workers) with no flaky tests.
 
 ### 4. Environments are data, not code
 
@@ -220,7 +220,7 @@ The `Playwright webServer` config starts and stops the app automatically in CI â
 
 ## Tech stack
 
-- **App:** Node.js, Express, TypeScript
+- **App:** Node.js, Express 5, TypeScript
 - **Tests:** Playwright 1.64, TypeScript, Allure, axe-core
 - **Quality:** ESLint (typescript-eslint, eslint-plugin-playwright), Prettier, `tsc` type-check
 - **Auth:** Bearer session token in `localStorage`, per-env credentials via env vars
