@@ -16,7 +16,7 @@
 | **Tests** | 87 across 3 environments (28 stable, 29 release, 30 int): UI, API, auth and accessibility |
 | **Speed** | Full suite in about 19s locally (fully parallel); each environment in about 6s in CI |
 | **Stability** | 435 of 435 passed in a stress run (5 repeats, 8 workers), with no flaky tests and no sleeps |
-| **Failing fast** | A broken selector fails CI in about 2.5 min instead of 16 ([PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2)) |
+| **Failing fast** | A broken selector fails CI in under 2 min instead of 16 ([PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2)) |
 | **Merge gate** | PRs to `main` need stable tests and lint to pass, enforced by branch protection |
 | **Accessibility** | Every screen of all three UIs passes axe-core WCAG 2.1 AA |
 
@@ -120,14 +120,14 @@ Pull requests run the tests of the branch they merge **into**, so a PR to `main`
 
 A dedicated `Stable gate` job runs on every PR to `main` and is a **required status check** in branch protection. It requires both the stable tests and the `Lint` job (type-check, ESLint, Prettier) to pass. Any result other than success (failed, cancelled or skipped) blocks the merge, and the gate also fails if the PR didn't run the stable suite.
 
-**See it in action:** [Demo PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2) renames the stable env's Add button id without updating the tests. 11 stable tests fail, the `Stable gate` fails, and the merge is blocked.
+**See it in action:** [Demo PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2) renames the stable env's Add button id without updating the tests. 15 stable tests fail, the `Stable gate` fails, and the merge is blocked.
 
 ![PR #2: the required Stable gate fails and the Merge button is disabled](docs/merge-blocked.png)
 
 <details>
 <summary>The pipeline run behind it</summary>
 
-![Workflow run: resolve-env → Test stable (failed) → Stable gate (failed), with the Allure report still published](docs/pipeline-run.png)
+![Workflow run: resolve-env and Lint pass, Test stable fails, so the Stable gate fails with "merge blocked"; the Allure report is still generated](docs/pipeline-run.png)
 
 </details>
 
@@ -212,7 +212,7 @@ Every run's summary page shows a pass / fail / flaky / skipped table per environ
 - Tests run fully parallel on 4 workers
 - 1 retry in CI, with 5s action and assertion timeouts (Playwright's default is 30s): the app responds in milliseconds, so a broken selector fails in seconds
 
-A green environment runs its tests in about 6s. A broken build fails in about 2.5 minutes instead of 16 (measured on [PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2)).
+A green environment runs its tests in about 6s. A broken build fails in under 2 minutes (1m 43s) instead of 16 (measured on [PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2)).
 
 The `Playwright webServer` config starts and stops the app automatically in CI — no separate server startup step needed.
 
