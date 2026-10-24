@@ -81,6 +81,15 @@ A dedicated `Stable gate` job runs on every PR to `main` and is a **required sta
 
 **See it in action:** [Demo PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2) renames the stable env's Add button id without updating the tests. 11 stable tests fail, the `Stable gate` fails, and the merge is blocked.
 
+![PR #2: the required Stable gate fails and the Merge button is disabled](docs/merge-blocked.png)
+
+<details>
+<summary>The pipeline run behind it</summary>
+
+![Workflow run: resolve-env → Test stable (failed) → Stable gate (failed), with Allure report and Slack notify still running](docs/pipeline-run.png)
+
+</details>
+
 ---
 
 ## Running locally
