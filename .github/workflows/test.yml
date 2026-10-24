@@ -62,6 +62,24 @@ jobs:
             esac
           fi
 
+  # Type-check, ESLint (incl. eslint-plugin-playwright) and Prettier
+  lint:
+    runs-on: ubuntu-latest
+    name: Lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check, lint and format check
+        run: npm run check
+
   test:
     runs-on: ubuntu-latest
     needs: resolve-env
@@ -77,7 +95,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
 
       - name: Install dependencies
@@ -100,23 +118,7 @@ jobs:
       # In CI, reuseExistingServer is false so it always starts a fresh one,
       # and TEST_ENVS limits it to the env under test.
       - name: Run Playwright tests (${{ matrix.env }})
-        id: run-tests
-        run: |
-          set +e
-          npx playwright test --project=${{ matrix.env }} 2>&1 | tee playwright-output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-          set -e
-
-          # Parse summary line: e.g. "16 passed", "14 passed, 2 failed"
-          PASSED=$(grep -oP '\d+(?= passed)' playwright-output.txt | tail -1 || echo 0)
-          FAILED=$(grep -oP '\d+(?= failed)' playwright-output.txt | tail -1 || echo 0)
-          SKIPPED=$(grep -oP '\d+(?= skipped)' playwright-output.txt | tail -1 || echo 0)
-          TOTAL=$((${PASSED:-0} + ${FAILED:-0} + ${SKIPPED:-0}))
-
-          echo '{"env":"${{ matrix.env }}","passed":'${PASSED:-0}',"failed":'${FAILED:-0}',"skipped":'${SKIPPED:-0}',"total":'${TOTAL}'}' > test-summary-${{ matrix.env }}.json
-          cat test-summary-${{ matrix.env }}.json
-
-          exit $EXIT_CODE
+        run: npx playwright test --project=${{ matrix.env }}
         env:
           TEST_ENVS: ${{ matrix.env }}
           STABLE_USERNAME: ${{ secrets.STABLE_USERNAME }}
@@ -126,13 +128,16 @@ jobs:
           INT_USERNAME: ${{ secrets.INT_USERNAME }}
           INT_PASSWORD: ${{ secrets.INT_PASSWORD }}
 
-      - name: Upload test summary
-        uses: actions/upload-artifact@v4
+      # Pass/fail/flaky counts and flaky test names on the run's summary page
+      - name: Test summary
         if: ${{ !cancelled() }}
-        with:
-          name: test-summary-${{ matrix.env }}
-          path: test-summary-${{ matrix.env }}.json
-          retention-days: 7
+        run: |
+          [ -f reports/results.json ] || exit 0
+          {
+            echo "## ${{ matrix.env }}"
+            jq -r '.stats | "| ✅ Passed | ❌ Failed | ⚠️ Flaky | ⏭️ Skipped | ⏱️ Duration |\n|---|---|---|---|---|\n| \(.expected) | \(.unexpected) | \(.flaky) | \(.skipped) | \(.duration / 1000 | floor)s |"' reports/results.json
+            jq -r '[.. | objects | select(has("specs")) | .specs[] | select(any(.tests[]; .status == "flaky")) | "- ⚠️ flaky: \(.file):\(.line) › \(.title)"] | .[]' reports/results.json
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test report
         uses: actions/upload-artifact@v4
@@ -222,7 +227,7 @@ jobs:
   # rules for main to block merges when stable tests fail.
   stable-gate:
     runs-on: ubuntu-latest
-    needs: [resolve-env, test]
+    needs: [resolve-env, lint, test]
     if: >
       always() &&
       github.event_name == 'pull_request' &&
@@ -236,129 +241,12 @@ jobs:
             echo "::error::Expected stable tests for a PR into main, got ${{ needs.resolve-env.outputs.envs }}"
             exit 1
           fi
+          if [[ "${{ needs.lint.result }}" != "success" ]]; then
+            echo "::error::Lint ${{ needs.lint.result }} — merge blocked"
+            exit 1
+          fi
           if [[ "${{ needs.test.result }}" != "success" ]]; then
             echo "::error::Stable tests ${{ needs.test.result }} — merge blocked"
             exit 1
           fi
           echo "Stable tests passed"
-
-  # Slack notification — runs on every workflow execution
-  notify:
-    runs-on: ubuntu-latest
-    needs: [resolve-env, test]
-    if: always()
-    name: Slack notify
-    steps:
-      - name: Download test summaries
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          pattern: test-summary-*
-          path: summaries
-          merge-multiple: true
-
-      - name: Send Slack notification
-        continue-on-error: true
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          if [[ -z "$SLACK_WEBHOOK_URL" ]]; then
-            echo "::warning::SLACK_WEBHOOK_URL secret is not set — skipping notification"
-            exit 0
-          fi
-
-          # Determine test status
-          if [[ "${{ needs.test.result }}" == "success" ]]; then
-            STATUS_EMOJI="white_check_mark"
-            STATUS_TEXT="passed"
-            COLOR="good"
-          else
-            STATUS_EMOJI="x"
-            STATUS_TEXT="failed"
-            COLOR="danger"
-          fi
-
-          # Aggregate test counts from summaries
-          TOTAL=0 PASSED=0 FAILED=0 SKIPPED=0
-          if ls summaries/test-summary-*.json 1>/dev/null 2>&1; then
-            TOTAL=$(jq -s '[.[].total] | add' summaries/test-summary-*.json)
-            PASSED=$(jq -s '[.[].passed] | add' summaries/test-summary-*.json)
-            FAILED=$(jq -s '[.[].failed] | add' summaries/test-summary-*.json)
-            SKIPPED=$(jq -s '[.[].skipped] | add' summaries/test-summary-*.json)
-          fi
-          RESULTS="Total: ${TOTAL}  |  :white_check_mark: ${PASSED} passed  |  :x: ${FAILED} failed  |  :fast_forward: ${SKIPPED} skipped"
-
-          ENVS='${{ needs.resolve-env.outputs.envs }}'
-          ALLURE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
-          WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-          # Build payload using jq to guarantee valid JSON
-          jq -n \
-            --arg color "$COLOR" \
-            --arg emoji ":${STATUS_EMOJI}:" \
-            --arg status "$STATUS_TEXT" \
-            --arg repo "${{ github.repository }}" \
-            --arg branch "${{ github.ref_name }}" \
-            --arg actor "${{ github.actor }}" \
-            --arg event "${{ github.event_name }}" \
-            --arg envs "$ENVS" \
-            --arg results "$RESULTS" \
-            --arg allure_url "$ALLURE_URL" \
-            --arg workflow_url "$WORKFLOW_URL" \
-            '{
-              "attachments": [{
-                "color": $color,
-                "blocks": [
-                  {
-                    "type": "header",
-                    "text": { "type": "plain_text", "text": "\($emoji) Playwright Tests \($status)", "emoji": true }
-                  },
-                  {
-                    "type": "section",
-                    "fields": [
-                      { "type": "mrkdwn", "text": "*Repository:*\n\($repo)" },
-                      { "type": "mrkdwn", "text": "*Branch:*\n\($branch)" },
-                      { "type": "mrkdwn", "text": "*Triggered by:*\n\($actor)" },
-                      { "type": "mrkdwn", "text": "*Event:*\n\($event)" }
-                    ]
-                  },
-                  {
-                    "type": "section",
-                    "fields": [
-                      { "type": "mrkdwn", "text": "*Environments tested:*\n\($envs)" }
-                    ]
-                  },
-                  {
-                    "type": "section",
-                    "text": { "type": "mrkdwn", "text": "*Test Results:*\n\($results)" }
-                  },
-                  {
-                    "type": "actions",
-                    "elements": [
-                      { "type": "button", "text": { "type": "plain_text", "text": "Allure Report", "emoji": true }, "url": $allure_url },
-                      { "type": "button", "text": { "type": "plain_text", "text": "Workflow Run", "emoji": true }, "url": $workflow_url }
-                    ]
-                  }
-                ]
-              }]
-            }' > slack-payload.json
-
-          echo "::group::Slack payload"
-          cat slack-payload.json
-          echo "::endgroup::"
-
-          # Send to Slack — show response body on failure for debugging
-          HTTP_CODE=$(curl -s -o response.txt -w '%{http_code}' -X POST \
-            -H 'Content-type: application/json' \
-            --data @slack-payload.json \
-            "$SLACK_WEBHOOK_URL")
-
-          cat response.txt
-          echo ""
-
-          if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
-            echo "::error::Slack returned HTTP $HTTP_CODE"
-            exit 1
-          fi
-
-          echo "Slack notification sent (HTTP $HTTP_CODE)"
