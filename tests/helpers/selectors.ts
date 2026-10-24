@@ -9,7 +9,9 @@
  * INT:     data-testid selectors, dark theme, modal editing, filter toolbar
  */
 
-export type EnvName = "stable" | "release" | "int";
+import type { EnvName } from "../../config/environments";
+
+export type { EnvName };
 
 export type EditMode = "inline" | "modal";
 
@@ -24,7 +26,6 @@ export interface EnvSelectors {
 
   // Todo item
   todoItem: string; // generic item selector
-  todoItemByText: (text: string) => string;
   todoCheckbox: string;
   todoText: string;
   editButton: string;
@@ -59,8 +60,6 @@ const selectorMap: Record<EnvName, EnvSelectors> = {
     addButton: "#add-todo",
     listContainer: "#todo-list",
     todoItem: "#todo-list li",
-    todoItemByText: (text: string) =>
-      `#todo-list li:has(span.todo-text:text("${text}"))`,
     todoCheckbox: ".toggle-checkbox",
     todoText: ".todo-text",
     editButton: ".edit-btn",
@@ -76,8 +75,6 @@ const selectorMap: Record<EnvName, EnvSelectors> = {
     addButton: ".add-card",
     listContainer: "#todo-cards",
     todoItem: ".todo-card",
-    todoItemByText: (text: string) =>
-      `.todo-card:has(.card-title:text("${text}"))`,
     todoCheckbox: ".card-checkbox",
     todoText: ".card-title",
     editButton: ".edit-icon",
@@ -96,8 +93,6 @@ const selectorMap: Record<EnvName, EnvSelectors> = {
     addButton: '[data-testid="add-todo"]',
     listContainer: '[data-testid="todo-list"]',
     todoItem: ".todo-item",
-    todoItemByText: (text: string) =>
-      `.todo-item:has(.item-text:text("${text}"))`,
     todoCheckbox: 'input[type="checkbox"]',
     todoText: ".item-text",
     editButton: ".action-edit",

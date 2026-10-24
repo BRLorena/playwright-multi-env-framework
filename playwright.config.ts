@@ -1,41 +1,41 @@
+import "dotenv/config";
 import { defineConfig, devices } from "@playwright/test";
-import path from "path";
-
-const authDir = path.resolve(__dirname, "tests", ".auth");
+import { selectedEnvironments } from "./config/environments";
+import type { TodoWorkerOptions } from "./tests/fixtures/todo.fixture";
 
 /**
  * Multi-environment Playwright configuration.
  *
- * Each project targets a different environment (stable, release, int)
- * with its own baseURL and custom metadata used by page objects
- * to resolve selectors and interaction patterns.
+ * One project per environment (stable, release, int), generated from
+ * config/environments.ts. Each project passes its envName to the
+ * fixtures, which pick the env's selectors and interaction patterns.
  *
- * Auth setup projects run first (once per env), log in, and save
- * localStorage to .auth/{env}.json. Test projects reuse that state.
+ * Auth: every worker logs in once through the UI and reuses that
+ * storageState for all its tests (see tests/fixtures/todo.fixture.ts).
+ * The app keeps one todo list per session, so workers are isolated and
+ * tests run fully in parallel.
  *
- * The webServer array auto-starts the env servers before tests and tears
- * them down afterwards. Servers are reused if already running.
- * TEST_ENVS (e.g. "stable" or "stable,int") limits which servers start;
- * CI sets it to the env under test. Default: all three.
+ * Local environments are started by webServer and torn down afterwards
+ * (reused if already running). An env with {ENV}_BASE_URL set runs
+ * against that URL instead. TEST_ENVS limits the run to some envs.
  */
-const PORTS = { stable: 3001, release: 3002, int: 3003 };
-const testEnvs = (process.env.TEST_ENVS || Object.keys(PORTS).join(","))
-  .split(",")
-  .map((env) => env.trim()) as (keyof typeof PORTS)[];
+const environments = selectedEnvironments();
 
-export default defineConfig({
+export default defineConfig<object, TodoWorkerOptions>({
   testDir: "./tests/specs",
-  fullyParallel: false,
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: 1,
-  // The app runs locally and responds in milliseconds: a missing element
-  // should fail fast instead of waiting out Playwright's 30s default.
+  // GitHub-hosted runners have 4 vCPUs; locally Playwright uses half the cores
+  workers: process.env.CI ? 4 : undefined,
+  // The app responds in milliseconds: a missing element should fail fast
+  // instead of waiting out Playwright's 30s default.
   timeout: 15_000,
   expect: { timeout: 5_000 },
   reporter: [
     ["html", { open: "never" }],
     ["list"],
+    ["json", { outputFile: "reports/results.json" }],
     [
       "allure-playwright",
       {
@@ -52,72 +52,22 @@ export default defineConfig({
     actionTimeout: 5_000,
     navigationTimeout: 10_000,
   },
-  webServer: testEnvs.map((env) => ({
-    command: `ENV_NAME=${env} ts-node --transpile-only app/server.ts`,
-    url: `http://localhost:${PORTS[env]}/api/env`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 10_000,
+  webServer: environments
+    .filter((env) => env.local)
+    .map((env) => ({
+      command: `ENV_NAME=${env.name} ts-node --transpile-only app/server.ts`,
+      url: `${env.baseURL}/api/env`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 10_000,
+    })),
+  projects: environments.map((env) => ({
+    name: env.name,
+    use: {
+      ...devices["Desktop Chrome"],
+      baseURL: env.baseURL,
+      envName: env.name,
+    },
+    // @all tests run everywhere; @stable/@release/@int only on that env
+    grep: [new RegExp(`@${env.name}\\b`), /@all\b/],
   })),
-  projects: [
-    // ── Auth setup projects (run first) ──────────────
-    {
-      name: "setup-stable",
-      testMatch: /auth\.setup\.ts/,
-      use: {
-        ...devices["Desktop Chrome"],
-        baseURL: "http://localhost:3001",
-      },
-    },
-    {
-      name: "setup-release",
-      testMatch: /auth\.setup\.ts/,
-      use: {
-        ...devices["Desktop Chrome"],
-        baseURL: "http://localhost:3002",
-      },
-    },
-    {
-      name: "setup-int",
-      testMatch: /auth\.setup\.ts/,
-      use: {
-        ...devices["Desktop Chrome"],
-        baseURL: "http://localhost:3003",
-      },
-    },
-
-    // ── Test projects (depend on their setup) ────────
-    {
-      name: "stable",
-      dependencies: ["setup-stable"],
-      use: {
-        ...devices["Desktop Chrome"],
-        baseURL: "http://localhost:3001",
-        storageState: path.join(authDir, "stable.json"),
-      },
-      metadata: { envName: "stable" },
-      grep: [/@stable/, /@all/],
-    },
-    {
-      name: "release",
-      dependencies: ["setup-release"],
-      use: {
-        ...devices["Desktop Chrome"],
-        baseURL: "http://localhost:3002",
-        storageState: path.join(authDir, "release.json"),
-      },
-      metadata: { envName: "release" },
-      grep: [/@release/, /@all/],
-    },
-    {
-      name: "int",
-      dependencies: ["setup-int"],
-      use: {
-        ...devices["Desktop Chrome"],
-        baseURL: "http://localhost:3003",
-        storageState: path.join(authDir, "int.json"),
-      },
-      metadata: { envName: "int" },
-      grep: [/@int/, /@all/],
-    },
-  ],
 });

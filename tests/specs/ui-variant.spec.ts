@@ -4,7 +4,9 @@ import { test, expect } from "../fixtures/todo.fixture";
  * Environment-specific UI tests.
  *
  * These test features or behaviors unique to each environment,
- * demonstrating how tags control which tests run where.
+ * demonstrating how tags control which tests run where. Selectors come
+ * from the same per-env map the page object uses (todoPage.s), so a UI
+ * change is fixed in one place.
  */
 
 // ─── STABLE-only tests ─────────────────────────────
@@ -13,63 +15,61 @@ test.describe("Stable UI specifics @stable", () => {
   test("should use inline editing (no modal)", async ({ todoPage, page }) => {
     await todoPage.addTodo("Inline edit test");
 
-    // Click edit — should reveal an inline input, not a modal
-    const item = todoPage.getTodoByText("Inline edit test");
-    await item.locator(".edit-btn").click();
+    await todoPage.openEdit("Inline edit test");
 
-    // Inline input should appear inside the list item
-    const inlineInput = item.locator(".inline-edit");
-    await expect(inlineInput).toBeVisible();
-
-    // No modal should be present
-    const modal = page.locator(".modal-overlay");
-    await expect(modal).toHaveCount(0);
+    // Inline input appears inside the list item, and no modal exists
+    await expect(
+      todoPage.item("Inline edit test").locator(todoPage.s.inlineEditInput!),
+    ).toBeVisible();
+    await expect(page.locator(".modal-overlay")).toHaveCount(0);
   });
 
-  test("should have id-based form selectors", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator("#add-todo-form")).toBeVisible();
-    await expect(page.locator("#todo-input")).toBeVisible();
-    await expect(page.locator("#add-todo")).toBeVisible();
+  test("should render todos as a plain list", async ({ todoPage, page }) => {
+    await todoPage.addTodo("List item");
+
+    await expect(page.locator(`${todoPage.s.listContainer} > li`)).toHaveCount(
+      1,
+    );
   });
 });
 
 // ─── RELEASE-only tests ────────────────────────────
 
 test.describe("Release UI specifics @release", () => {
-  test("should use modal for editing", async ({ todoPage, page }) => {
+  test("should use a modal for editing and cancel it", async ({
+    todoPage,
+    page,
+  }) => {
     await todoPage.addTodo("Modal edit test");
+    const modal = page.locator(todoPage.s.modalOverlay!);
 
-    // Click edit — should open a modal
-    const card = todoPage.getTodoByText("Modal edit test");
-    await card.locator(".edit-icon").click();
-
-    const modal = page.locator("#edit-modal");
+    await todoPage.openEdit("Modal edit test");
     await expect(modal).toHaveClass(/active/);
+    await expect(page.locator(todoPage.s.modalInput!)).toHaveValue(
+      "Modal edit test",
+    );
 
-    // Cancel the modal
-    await page.click("#modal-cancel");
+    await page.locator(todoPage.s.modalCancel!).click();
     await expect(modal).not.toHaveClass(/active/);
+    await expect(todoPage.itemTexts).toHaveText(["Modal edit test"]);
   });
 
-  test("should render todos as cards", async ({ todoPage, page }) => {
+  test("should render todos as cards", async ({ todoPage }) => {
     await todoPage.addTodo("Card item");
 
-    const card = page.locator(".todo-card");
+    const card = todoPage.item("Card item");
     await expect(card).toHaveCount(1);
-
-    // Should have card-specific classes
-    await expect(card.locator(".card-title")).toBeVisible();
     await expect(card.locator(".card-actions")).toBeVisible();
   });
 
-  test("should close modal on overlay click", async ({ todoPage, page }) => {
+  test("should close the modal on overlay click", async ({
+    todoPage,
+    page,
+  }) => {
     await todoPage.addTodo("Overlay test");
+    const modal = page.locator(todoPage.s.modalOverlay!);
 
-    const card = todoPage.getTodoByText("Overlay test");
-    await card.locator(".edit-icon").click();
-
-    const modal = page.locator("#edit-modal");
+    await todoPage.openEdit("Overlay test");
     await expect(modal).toHaveClass(/active/);
 
     // Click the overlay (not the modal content)
@@ -81,68 +81,52 @@ test.describe("Release UI specifics @release", () => {
 // ─── INT-only tests ────────────────────────────────
 
 test.describe("INT UI specifics @int", () => {
-  test("should have data-testid selectors", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator('[data-testid="add-todo-form"]')).toBeVisible();
-    await expect(page.locator('[data-testid="todo-input"]')).toBeVisible();
-    await expect(page.locator('[data-testid="add-todo"]')).toBeVisible();
+  test("should display the filter toolbar", async ({ todoPage, page }) => {
+    await expect(page.getByTestId("toolbar")).toBeVisible();
+    for (const filter of [
+      todoPage.s.filterAll!,
+      todoPage.s.filterActive!,
+      todoPage.s.filterCompleted!,
+    ]) {
+      await expect(page.locator(filter)).toBeVisible();
+    }
   });
 
-  test("should display filter toolbar", async ({ todoPage, page }) => {
-    await expect(page.locator('[data-testid="toolbar"]')).toBeVisible();
-    await expect(page.locator('[data-testid="filter-all"]')).toBeVisible();
-    await expect(page.locator('[data-testid="filter-active"]')).toBeVisible();
-    await expect(
-      page.locator('[data-testid="filter-completed"]'),
-    ).toBeVisible();
-  });
-
-  test("should filter active todos", async ({ todoPage }) => {
+  test("should filter active and completed todos", async ({ todoPage }) => {
     await todoPage.addTodo("Active task");
     await todoPage.addTodo("Done task");
     await todoPage.toggleTodo("Done task");
 
-    await todoPage.filterActive();
+    await todoPage.filter("active");
+    await expect(todoPage.itemTexts).toHaveText(["Active task"]);
 
-    const texts = await todoPage.getTodoTexts();
-    expect(texts).toContain("Active task");
-    expect(texts).not.toContain("Done task");
+    await todoPage.filter("completed");
+    await expect(todoPage.itemTexts).toHaveText(["Done task"]);
+
+    await todoPage.filter("all");
+    await expect(todoPage.itemTexts).toHaveText(["Active task", "Done task"]);
   });
 
-  test("should filter completed todos", async ({ todoPage }) => {
-    await todoPage.addTodo("Active task");
-    await todoPage.addTodo("Done task");
-    await todoPage.toggleTodo("Done task");
-
-    await todoPage.filterCompleted();
-
-    const texts = await todoPage.getTodoTexts();
-    expect(texts).toContain("Done task");
-    expect(texts).not.toContain("Active task");
-  });
-
-  test("should show correct counter", async ({ todoPage }) => {
+  test("should show the correct counter", async ({ todoPage }) => {
     await todoPage.addTodo("Task one");
     await todoPage.addTodo("Task two");
-
-    let counter = await todoPage.getCounterText();
-    expect(counter).toBe("2 items left");
+    await expect(todoPage.counter).toHaveText("2 items left");
 
     await todoPage.toggleTodo("Task one");
-    counter = await todoPage.getCounterText();
-    expect(counter).toBe("1 item left");
+    await expect(todoPage.counter).toHaveText("1 item left");
   });
 
-  test("should use modal for editing", async ({ todoPage, page }) => {
-    await todoPage.addTodo("Modal in INT");
+  test("should close the edit modal with Escape", async ({
+    todoPage,
+    page,
+  }) => {
+    await todoPage.addTodo("Escape test");
+    const modal = page.locator(todoPage.s.modalOverlay!);
 
-    const item = todoPage.getTodoByText("Modal in INT");
-    await item.locator(".action-edit").click();
-
-    const modal = page.locator('[data-testid="edit-modal"]');
+    await todoPage.openEdit("Escape test");
     await expect(modal).toHaveClass(/active/);
 
-    await page.click('[data-testid="modal-cancel"]');
+    await page.keyboard.press("Escape");
     await expect(modal).not.toHaveClass(/active/);
   });
 });

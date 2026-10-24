@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 
 export interface Todo {
   id: string;
@@ -8,19 +8,30 @@ export interface Todo {
   createdAt: string;
 }
 
-// In-memory store (resets on restart — good for testing)
-let todos: Todo[] = [];
+// In-memory store, one list per session token (resets on restart — good for testing).
+// Each login gets its own data, so parallel test workers never see each other's todos.
+const todosBySession = new Map<string, Todo[]>();
+
+function sessionTodos(res: Response): Todo[] {
+  const token: string = res.locals.token;
+  let todos = todosBySession.get(token);
+  if (!todos) {
+    todos = [];
+    todosBySession.set(token, todos);
+  }
+  return todos;
+}
 
 export const todoRouter = Router();
 
 // GET all todos
 todoRouter.get("/", (_req: Request, res: Response) => {
-  res.json(todos);
+  res.json(sessionTodos(res));
 });
 
 // GET single todo
 todoRouter.get("/:id", (req: Request, res: Response) => {
-  const todo = todos.find((t) => t.id === req.params.id);
+  const todo = sessionTodos(res).find((t) => t.id === req.params.id);
   if (!todo) {
     return res.status(404).json({ error: "Todo not found" });
   }
@@ -34,17 +45,18 @@ todoRouter.post("/", (req: Request, res: Response) => {
     return res.status(400).json({ error: "Title is required" });
   }
   const todo: Todo = {
-    id: uuidv4(),
+    id: randomUUID(),
     title: title.trim(),
     completed: false,
     createdAt: new Date().toISOString(),
   };
-  todos.push(todo);
+  sessionTodos(res).push(todo);
   res.status(201).json(todo);
 });
 
 // PUT update todo
 todoRouter.put("/:id", (req: Request, res: Response) => {
+  const todos = sessionTodos(res);
   const index = todos.findIndex((t) => t.id === req.params.id);
   if (index === -1) {
     return res.status(404).json({ error: "Todo not found" });
@@ -66,6 +78,7 @@ todoRouter.put("/:id", (req: Request, res: Response) => {
 
 // DELETE todo
 todoRouter.delete("/:id", (req: Request, res: Response) => {
+  const todos = sessionTodos(res);
   const index = todos.findIndex((t) => t.id === req.params.id);
   if (index === -1) {
     return res.status(404).json({ error: "Todo not found" });
@@ -76,6 +89,6 @@ todoRouter.delete("/:id", (req: Request, res: Response) => {
 
 // DELETE all todos (useful for test cleanup)
 todoRouter.delete("/", (_req: Request, res: Response) => {
-  todos = [];
+  todosBySession.set(res.locals.token, []);
   res.json({ message: "All todos deleted" });
 });

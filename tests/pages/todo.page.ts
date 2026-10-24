@@ -1,4 +1,4 @@
-import { Page, Locator, expect } from "@playwright/test";
+import { Page, Locator, Response, expect } from "@playwright/test";
 import { EnvSelectors, EnvName, getSelectors } from "../helpers/selectors";
 
 /**
@@ -6,145 +6,140 @@ import { EnvSelectors, EnvName, getSelectors } from "../helpers/selectors";
  *
  * Abstracts all interactions behind environment-aware selectors.
  * The same test code works across stable, release, and int environments.
+ *
+ * Actions wait for the app to finish reloading the list from the API,
+ * so tests never need fixed sleeps; assertions live in the tests and
+ * use web-first (auto-retrying) expects on the locators exposed here.
  */
 export class TodoPage {
   readonly page: Page;
   readonly env: EnvName;
   readonly s: EnvSelectors;
 
+  readonly input: Locator;
+  readonly addButton: Locator;
+  readonly items: Locator;
+  readonly itemTexts: Locator;
+  readonly emptyState: Locator;
+
   constructor(page: Page, env: EnvName) {
     this.page = page;
     this.env = env;
     this.s = getSelectors(env);
+
+    this.input = page.locator(this.s.todoInput);
+    this.addButton = page.locator(this.s.addButton);
+    this.items = page.locator(this.s.todoItem);
+    this.itemTexts = this.items.locator(this.s.todoText);
+    this.emptyState = page.locator(this.s.emptyState);
   }
 
   // ─── Navigation ───────────────────────────────────
 
   async goto() {
+    const listLoaded = this.waitForListReload();
     await this.page.goto("/");
-    // Wait for the page to be fully loaded
-    await this.page.waitForSelector(this.s.addButton);
+    await listLoaded;
+  }
+
+  // ─── Locators ─────────────────────────────────────
+
+  /** The todo whose title is exactly `text` */
+  item(text: string): Locator {
+    return this.items.filter({
+      has: this.page.locator(this.s.todoText, { hasText: exactText(text) }),
+    });
+  }
+
+  checkbox(text: string): Locator {
+    return this.item(text).locator(this.s.todoCheckbox);
   }
 
   // ─── CREATE ───────────────────────────────────────
 
   async addTodo(title: string) {
-    await this.page.fill(this.s.todoInput, title);
-    await this.page.click(this.s.addButton);
-    // Wait for the new item to appear
-    await this.page.waitForSelector(this.s.todoItemByText(title));
-  }
-
-  // ─── READ ─────────────────────────────────────────
-
-  async getTodoItems(): Promise<Locator> {
-    return this.page.locator(this.s.todoItem);
-  }
-
-  async getTodoCount(): Promise<number> {
-    return await this.page.locator(this.s.todoItem).count();
-  }
-
-  async getTodoTexts(): Promise<string[]> {
-    const items = this.page.locator(`${this.s.todoItem} ${this.s.todoText}`);
-    return await items.allTextContents();
-  }
-
-  getTodoByText(text: string): Locator {
-    return this.page.locator(this.s.todoItemByText(text));
-  }
-
-  async isEmptyStateVisible(): Promise<boolean> {
-    return await this.page.locator(this.s.emptyState).isVisible();
+    await this.input.fill(title);
+    await this.reloadAfter(() => this.addButton.click());
   }
 
   // ─── UPDATE (toggle) ─────────────────────────────
 
   async toggleTodo(text: string) {
-    const item = this.getTodoByText(text);
-    await item.locator(this.s.todoCheckbox).click();
-    // Wait for the UI to update
-    await this.page.waitForTimeout(300);
-  }
-
-  async isTodoCompleted(text: string): Promise<boolean> {
-    const item = this.getTodoByText(text);
-    const checkbox = item.locator(this.s.todoCheckbox);
-    return await checkbox.isChecked();
+    await this.reloadAfter(() => this.checkbox(text).click());
   }
 
   // ─── UPDATE (edit title) ─────────────────────────
   // This is the KEY method that differs between environments
 
+  async openEdit(text: string) {
+    await this.item(text).locator(this.s.editButton).click();
+  }
+
   async editTodo(text: string, newTitle: string) {
-    const item = this.getTodoByText(text);
-    await item.locator(this.s.editButton).click();
+    await this.openEdit(text);
 
     if (this.s.editMode === "inline") {
       // STABLE: inline editing
-      const editInput = item.locator(this.s.inlineEditInput!);
-      await editInput.clear();
+      const editInput = this.item(text).locator(this.s.inlineEditInput!);
       await editInput.fill(newTitle);
-      await editInput.press("Enter");
+      await this.reloadAfter(() => editInput.press("Enter"));
     } else {
       // RELEASE & INT: modal editing
       const modalInput = this.page.locator(this.s.modalInput!);
       await expect(modalInput).toBeVisible();
-      await modalInput.clear();
       await modalInput.fill(newTitle);
-      await this.page.click(this.s.modalSave!);
+      await this.reloadAfter(() =>
+        this.page.locator(this.s.modalSave!).click(),
+      );
     }
-
-    // Wait for the updated item to appear
-    await this.page.waitForSelector(this.s.todoItemByText(newTitle));
   }
 
   // ─── DELETE ───────────────────────────────────────
 
   async deleteTodo(text: string) {
-    const item = this.getTodoByText(text);
-    const countBefore = await this.getTodoCount();
-    await item.locator(this.s.deleteButton).click();
-    // Wait for item count to decrease
-    await expect(this.page.locator(this.s.todoItem)).toHaveCount(
-      countBefore - 1,
+    await this.reloadAfter(() =>
+      this.item(text).locator(this.s.deleteButton).click(),
     );
   }
 
   // ─── INT-only: Filters ───────────────────────────
 
-  async filterAll() {
-    if (!this.s.filterAll) throw new Error("Filter not available in this env");
-    await this.page.click(this.s.filterAll);
+  async filter(name: "all" | "active" | "completed") {
+    const selector = {
+      all: this.s.filterAll,
+      active: this.s.filterActive,
+      completed: this.s.filterCompleted,
+    }[name];
+    if (!selector) throw new Error(`Filters not available in ${this.env}`);
+    await this.page.locator(selector).click();
   }
 
-  async filterActive() {
-    if (!this.s.filterActive)
-      throw new Error("Filter not available in this env");
-    await this.page.click(this.s.filterActive);
-  }
-
-  async filterCompleted() {
-    if (!this.s.filterCompleted)
-      throw new Error("Filter not available in this env");
-    await this.page.click(this.s.filterCompleted);
-  }
-
-  async getCounterText(): Promise<string> {
+  get counter(): Locator {
     if (!this.s.todoCounter)
-      throw new Error("Counter not available in this env");
-    return (await this.page.locator(this.s.todoCounter).textContent()) || "";
+      throw new Error(`Counter not available in ${this.env}`);
+    return this.page.locator(this.s.todoCounter);
   }
 
-  // ─── Cleanup ──────────────────────────────────────
+  // ─── Sync helpers ─────────────────────────────────
 
-  async clearAllTodos() {
-    // Get auth token from localStorage (set by storageState)
-    const token = await this.page.evaluate(() =>
-      localStorage.getItem("auth-token"),
+  /** Resolves when the app re-fetches the todo list (GET /api/todos) */
+  private waitForListReload(): Promise<Response> {
+    return this.page.waitForResponse(
+      (res) =>
+        res.request().method() === "GET" &&
+        new URL(res.url()).pathname === "/api/todos",
     );
-    await this.page.request.delete("/api/todos", {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
   }
+
+  /** Runs a UI action that changes data, then waits for the list reload */
+  private async reloadAfter(action: () => Promise<void>) {
+    const reloaded = this.waitForListReload();
+    await action();
+    await reloaded;
+  }
+}
+
+/** Regex matching `text` exactly (after trimming), with regex chars escaped */
+function exactText(text: string): RegExp {
+  return new RegExp(`^\\s*${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`);
 }

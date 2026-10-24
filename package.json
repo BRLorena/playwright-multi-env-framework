@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "TODO CRUD app with multi-environment UI for automation test practice",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "start:stable": "ENV_NAME=stable node dist/server.js",
     "start:release": "ENV_NAME=release node dist/server.js",
@@ -12,23 +12,34 @@
     "dev:stable": "ENV_NAME=stable ts-node app/server.ts",
     "dev:release": "ENV_NAME=release ts-node app/server.ts",
     "dev:int": "ENV_NAME=int ts-node app/server.ts",
-    "test": "npx playwright test",
-    "test:stable": "npx playwright test --project=stable",
-    "test:release": "npx playwright test --project=release",
-    "test:int": "npx playwright test --project=int"
+    "test": "playwright test",
+    "test:stable": "playwright test --project=stable",
+    "test:release": "playwright test --project=release",
+    "test:int": "playwright test --project=int",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,mjs,json}\"",
+    "format:check": "prettier --check \"**/*.{ts,mjs,json}\"",
+    "check": "npm run typecheck && npm run lint && npm run format:check"
   },
   "dependencies": {
     "dotenv": "^17.4.1",
-    "express": "^4.18.2",
-    "uuid": "^9.0.0"
+    "express": "^4.18.2"
   },
   "devDependencies": {
-    "@playwright/test": "^1.42.0",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
     "@types/express": "^4.17.21",
-    "@types/node": "^20.11.0",
-    "@types/uuid": "^9.0.7",
-    "allure-playwright": "^3.6.0",
+    "@types/node": "^22.20.5",
+    "allure-playwright": "^3.14.0",
+    "eslint": "^10.13.0",
+    "eslint-plugin-playwright": "^2.12.1",
+    "prettier": "^3.9.10",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.72.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
