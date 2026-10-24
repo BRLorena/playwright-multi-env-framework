@@ -79,6 +79,8 @@ Pull requests run the tests of the branch they merge **into**, so a PR to `main`
 
 A dedicated `Stable gate` job runs on every PR to `main` and is a **required status check** in branch protection. Any result other than success (failed, cancelled or skipped tests) blocks the merge, and the gate also fails if the PR didn't run the stable suite.
 
+**See it in action:** [Demo PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2) renames the stable env's Add button id without updating the tests. 11 stable tests fail, the `Stable gate` fails, and the merge is blocked.
+
 ---
 
 ## Running locally
@@ -134,6 +136,14 @@ Triggers:
 - `workflow_dispatch` → manually pick `stable`, `release`, `int`, or `all`
 
 The Allure report is published to [GitHub Pages](https://brlorena.github.io/playwright-multi-env-framework/) only from `main`, so PRs and the `release`/`int` branches never overwrite it. Each run downloads the previous report's history so trends carry over.
+
+### Pipeline speed
+
+- Playwright browsers are cached between runs, and the install is skipped on a cache hit
+- Only the server for the environment under test is started
+- 1 retry in CI, with 5s action and assertion timeouts (Playwright's default is 30s): the app responds in milliseconds, so a broken selector fails in seconds
+
+A green stable run executes its tests in about 12s. A broken build fails in about 2.5 minutes instead of 16 (measured on [PR #2](https://github.com/BRLorena/playwright-multi-env-framework/pull/2)).
 
 The `Playwright webServer` config starts and stops the app automatically in CI — no separate server startup step needed.
 
