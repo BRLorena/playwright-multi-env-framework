@@ -186,23 +186,27 @@ jobs:
           path: allure-results
           merge-multiple: true
 
-      - name: Install Allure CLI
-        run: |
-          curl -sL https://github.com/allure-framework/allure2/releases/download/2.30.0/allure-2.30.0.tgz | tar xz
-          echo "$PWD/allure-2.30.0/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
 
-      # The previous report's history/ folder is served by GitHub Pages; Allure needs it for trends.
+      - name: Install dependencies
+        run: npm ci
+
+      # Allure 3 keeps trend data in one history.jsonl file (see allurerc.mjs).
+      # Each main deploy publishes it next to the report on GitHub Pages.
       - name: Download previous Allure history
         continue-on-error: true
         run: |
-          mkdir -p allure-results/history
-          for f in categories-trend duration-trend history-trend history retry-trend; do
-            curl -fsSL "$PAGES_URL/history/$f.json" -o "allure-results/history/$f.json" \
-              && echo "Downloaded $f.json" || echo "No previous $f.json"
-          done
+          curl -fsSL "$PAGES_URL/history.jsonl" -o history.jsonl \
+            && echo "Downloaded history ($(wc -l < history.jsonl) runs)" \
+            || { rm -f history.jsonl; echo "No previous history"; }
 
       - name: Generate Allure report
-        run: allure generate allure-results --clean -o allure-report
+        run: |
+          npx allure generate allure-results
+          cp history.jsonl allure-report/
 
       - name: Upload Allure report artifact
         uses: actions/upload-artifact@v4
