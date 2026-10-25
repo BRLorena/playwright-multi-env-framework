@@ -160,6 +160,9 @@ npx playwright test --project=int
 # Type-check, lint and format check (what the CI Lint job runs)
 npm run check
 
+# Build the Allure 3 report from the last run and open it
+npm run report
+
 # Start a server manually (useful for exploratory testing)
 npm run dev:stable    # http://localhost:3001
 npm run dev:release   # http://localhost:3002
@@ -201,7 +204,7 @@ Triggers:
 - `schedule` (daily 6am UTC) → runs all three environments
 - `workflow_dispatch` → manually pick `stable`, `release`, `int`, or `all`
 
-The Allure report is published to [GitHub Pages](https://brlorena.github.io/playwright-multi-env-framework/) only from `main`, so PRs and the `release`/`int` branches never overwrite it. Each run downloads the previous report's history so trends carry over.
+The Allure report is published to [GitHub Pages](https://brlorena.github.io/playwright-multi-env-framework/) only from `main`, so PRs and the `release`/`int` branches never overwrite it. The report is built with Allure 3 ([allurerc.mjs](allurerc.mjs)); each run downloads the previous `history.jsonl` from Pages and publishes the updated one, so trends carry over.
 
 Every run's summary page shows a pass / fail / flaky / skipped table per environment, read from Playwright's JSON report, and lists any test that only passed on retry.
 
@@ -221,7 +224,7 @@ The `Playwright webServer` config starts and stops the app automatically in CI �
 ## Tech stack
 
 - **App:** Node.js, Express 5, TypeScript
-- **Tests:** Playwright 1.64, TypeScript, Allure, axe-core
+- **Tests:** Playwright 1.64, TypeScript, Allure 3, axe-core
 - **Quality:** ESLint (typescript-eslint, eslint-plugin-playwright), Prettier, `tsc` type-check
 - **Auth:** Bearer session token in `localStorage`, per-env credentials via env vars
 - **CI:** GitHub Actions with matrix strategy and branch-scoped execution
